@@ -1,23 +1,32 @@
 use std::fs::File;
+use std::io::{BufRead, BufReader};
 use csv::ReaderBuilder;
 use crate::usb_request_block::{USBDirection, USBRequestBlock, USBSpeed};
 
 pub(crate) struct TotalPhaseCsvReader {
-    reader: csv::Reader<File>
+    reader: csv::Reader<BufReader<File>>
 }
 
 impl TotalPhaseCsvReader {
     pub(crate) fn new(file_path: &str) -> Result<Self, csv::Error> {
         let file = std::fs::File::open(file_path)
             .map_err(csv::Error::from)?;
+
+        let mut reader = BufReader::new(file);
+
+        // Skip the first several rows as they are junk
+        for _ in 0..6 { // Skip the first two lines
+            let mut line = String::new();
+            reader.read_line(&mut line)?; // Read and discard a line
+        }
+
         let reader = ReaderBuilder::new()
-            .flexible(true)
-            .from_reader(file);
+            .from_reader(reader);
         Ok(Self { reader })
     }
 
 
-fn from_csv_record(record: &csv::StringRecord) -> Option<USBRequestBlock> {
+    fn from_csv_record(record: &csv::StringRecord) -> Option<USBRequestBlock> {
         let level: u8 = record[0].parse().unwrap();
         let index: u32 = record[2].parse().unwrap();
         let time_offset: String = record[3].parse().unwrap();
