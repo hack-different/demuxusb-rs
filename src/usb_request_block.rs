@@ -2,7 +2,7 @@ use std::iter::Map;
 use uuid::Uuid;
 use bitflags::bitflags;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum USBDirection {
     DirectionNone,
     DirectionIn,
