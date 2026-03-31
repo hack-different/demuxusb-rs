@@ -2,6 +2,7 @@ use std::iter::Map;
 use uuid::Uuid;
 use bitflags::bitflags;
 
+#[derive(Debug)]
 pub enum USBDirection {
     DirectionNone,
     DirectionIn,
@@ -47,7 +48,20 @@ pub enum USBDescriptorType {
     SuperSpeedEndpointCompanion = 0x30
 }
 
-enum LibusbBosType {
+pub enum USBDescriptor {
+    Device(USBDeviceDescriptor),
+    Configuration(USBConfigDescriptor),
+    String(String),
+    Interface(InterfaceDescriptor),
+    Endpoint(EndpointDescriptor),
+    InterfaceAssociation(InterfaceAssociationDescriptor),
+    BOS(BinaryObjectStoreDescriptor),
+    DeviceCapability(BosDevCapabilityDescriptor),
+    HID(u8),
+    Report(u8),
+}
+
+enum USBBinaryObjectStoreType {
     LibusbBtWirelessUsbDeviceCapability = 1,
     LibusbBtUsb20Extension = 2,
     LibusbBtSsUsbDeviceCapability = 3,
@@ -75,6 +89,7 @@ const BT_PLATFORM_DESCRIPTOR_MIN_SIZE : u8  =   20;
 const ENDPOINT_ADDRESS_MASK: u8 =        0x0f ;
 const ENDPOINT_DIR_MASK : u8 =       0x80;
 
+#[derive(Debug)]
 pub enum USBSpeed {
     SpeedUnknown,
     SpeedLow,
@@ -144,6 +159,7 @@ pub struct USBGetDeviceDescriptor {
     index: u8
 }
 
+#[derive(Debug)]
 pub struct USBRequestBlock {
     pub direction: USBDirection,
     pub speed: USBSpeed,
@@ -280,29 +296,29 @@ struct SsEndpointCompanionDescriptor {
 struct BosDevCapabilityDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
-    compatability_type: LibusbBosType,
+    compatability_type: USBBinaryObjectStoreType,
     dev_capability_data: *const u8,
 }
 
-struct BosDescriptor {
+struct BinaryObjectStoreDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
     total_length: u16,
     device_capability_count: u8,
-    dev_capability: [BosDevCapabilityDescriptor],
+    dev_capability: Vec<BosDevCapabilityDescriptor>,
 }
 
 struct LibusbUsb20ExtensionDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
-    compatability_type: LibusbBosType,
+    compatability_type: USBBinaryObjectStoreType,
     attributes: USBAttributes,
 }
 
 struct SsUsbDeviceCapabilityDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
-    compatability_type: LibusbBosType,
+    compatability_type: USBBinaryObjectStoreType,
     attributes: USBAttributes,
     speed_supported: u16,
     functionality_support: u8,
@@ -359,7 +375,7 @@ struct SsplusUsbDeviceCapabilityDescriptor {
 struct ContainerIdDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
-    compatability_type: LibusbBosType,
+    compatability_type: USBBinaryObjectStoreType,
     reserved: u8,
     container_id : [u8; 16],
 }
@@ -367,7 +383,7 @@ struct ContainerIdDescriptor {
 struct USBPlatformDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
-    compatability_type: LibusbBosType,
+    compatability_type: USBBinaryObjectStoreType,
     reserved: u8,
     platform_capability_uuid: [u8; 16],
     capability_type: [u8],

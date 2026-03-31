@@ -27,13 +27,13 @@ impl TotalPhaseCsvReader {
 
 
     fn from_csv_record(record: &csv::StringRecord) -> Option<USBRequestBlock> {
-        let level: u8 = record[0].parse().unwrap();
+        let _level: u8 = record[0].parse().unwrap();
         let index: u32 = record[2].parse().unwrap();
-        let time_offset: String = record[3].parse().unwrap();
-        let duration: String = record[4].parse().unwrap();
+        let _time_offset: String = record[3].parse().unwrap();
+        let _duration: String = record[4].parse().unwrap();
         let device: Option<u8> = record[7].parse().ok();
         let endpoint: Option<u8> = record[8].parse().ok();
-        let packet_type: String = record[9].parse().unwrap();
+        let _packet_type: String = record[9].parse().unwrap();
         let duration_ns = 0;
         let index_ns = 0;
 
@@ -58,7 +58,7 @@ impl TotalPhaseCsvReader {
             _ => USBDirection::DirectionNone
         };
 
-        let data = hex::decode(record[10].replace(" ", "")).unwrap_or_else(|err| Vec::new());
+        let data = hex::decode(record[10].replace(" ", "")).unwrap_or_else(|_| Vec::new());
 
         Some(USBRequestBlock {
             speed,
