@@ -10,3 +10,4 @@ csv = "1.4.0"
 hex = "0.4.3"
 uuid = { version = "1.21.0", features = ["v4"] }
 bitflags = "2.11.0"
+pcap-file = "2.0.0-rc1"

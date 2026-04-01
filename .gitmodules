@@ -1,0 +1,3 @@
+[submodule "ext/testdata"]
+	path = ext/testdata
+	url = https://github.com/rickmark/USBTraces
