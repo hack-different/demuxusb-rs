@@ -1,84 +1,101 @@
-use std::io::{Write, Result};
-use crate::usb_request_block::{USBRequestBlock, USBDirection};
+use std::borrow::Cow;
+use std::fs::File;
+use std::io::{Write, Result, BufWriter};
+use std::mem;
+use std::time::Duration;
+use crate::usb_request_block::{USBRequestBlock, USBDirection, USBTransferType, USBControlStage};
+use pcap_file::pcapng::PcapNgWriter;
+use pcap_file::{DataLink, PcapError};
+use pcap_file::pcapng::blocks::enhanced_packet::EnhancedPacketBlock;
+use pcap_file::pcapng::blocks::interface_description::InterfaceDescriptionBlock;
+use zerocopy::IntoBytes;
+use zerocopy_derive::{Immutable, IntoBytes};
 
-pub struct PcapWriter<W: Write> {
-    writer: W,
+pub struct USBPcapWriter {
+    writer: PcapNgWriter<BufWriter<File>>,
 }
 
-impl<W: Write> PcapWriter<W> {
-    pub fn new(mut writer: W) -> Result<Self> {
-        // PCAP Global Header
-        // magic_number (4 bytes) - 0xa1b2c3d4 (microsecond resolution)
-        // version_major (2 bytes) - 2
-        // version_minor (2 bytes) - 4
-        // thiszone (4 bytes) - 0
-        // sigfigs (4 bytes) - 0
-        // snaplen (4 bytes) - 65535
-        // network (4 bytes) - 189 (LINKTYPE_USB_LINUX)
-        
-        writer.write_all(&0xa1b2c3d4u32.to_le_bytes())?;
-        writer.write_all(&2u16.to_le_bytes())?;
-        writer.write_all(&4u16.to_le_bytes())?;
-        writer.write_all(&0i32.to_le_bytes())?;
-        writer.write_all(&0u32.to_le_bytes())?;
-        writer.write_all(&65535u32.to_le_bytes())?;
-        writer.write_all(&189u32.to_le_bytes())?;
-        
-        Ok(Self { writer })
+#[repr(C, packed)]
+#[derive(IntoBytes, Immutable)]
+struct USBPcapPacketHeader {
+    header_length: u16,
+    io_packet_id: u64,
+    usb_status: u32,
+    urb_function: u16,
+    info: u8,
+    bus: u16,
+    device: u16,
+    endpoint: u8,
+    transfer: u8,
+    data_length: u32,
+}
+
+impl USBPcapWriter {
+    pub fn new(file: BufWriter<File>) -> Result<Self> {
+
+        let mut writer = PcapNgWriter::new(file).unwrap();
+
+        let interface = InterfaceDescriptionBlock {
+            linktype: DataLink::USBPCAP,
+            snaplen: 0xFFFF,
+            options: vec![],
+        };
+        writer.write_pcapng_block(interface).expect("Must be able to write interface type");
+        Ok(
+            USBPcapWriter {
+                writer
+            }
+        )
     }
 
-    pub fn write_urb(&mut self, urb: &USBRequestBlock) -> Result<()> {
-        let timestamp_sec = (urb.index_ns / 1_000_000_000) as u32;
-        let timestamp_usec = ((urb.index_ns % 1_000_000_000) / 1_000) as u32;
-        
-        // USB-Linux header (DLT 189) can be 48 or 64 bytes. 
-        // Wireshark generally expects 64 bytes for modern captures.
-        let mut usb_header = [0u8; 64];
-        
-        let id = urb.index as u64;
-        let transfer_type = if urb.endpoint_number == 0 { 2u8 } else { 3u8 };
-        let ep_addr = if urb.direction == USBDirection::DirectionIn {
-            urb.endpoint_number | 0x80
-        } else {
-            urb.endpoint_number
-        };
-        let bus_number = 1u16;
-        let is_control = urb.endpoint_number == 0;
-        let setup_flag = if is_control && urb.data.len() >= 8 { 0 } else { 1 };
-        let status = 0i32;
-        let urb_len = urb.data.len() as u32;
+    pub fn write_urbs(&mut self, urbs: &Vec< USBRequestBlock>) -> Result<()> {
+        for urb in urbs {
+            let size = mem::size_of::<USBPcapPacketHeader>();
 
-        usb_header[0..8].copy_from_slice(&id.to_le_bytes());
-        usb_header[8] = b'C'; // Completed
-        usb_header[9] = transfer_type;
-        usb_header[10] = ep_addr;
-        usb_header[11] = urb.device_number;
-        usb_header[12..14].copy_from_slice(&bus_number.to_le_bytes());
-        usb_header[14] = setup_flag;
-        usb_header[15] = if urb.data.is_empty() { 1 } else { 0 };
-        usb_header[16..24].copy_from_slice(&(timestamp_sec as u64).to_le_bytes());
-        usb_header[24..28].copy_from_slice(&timestamp_usec.to_le_bytes());
-        usb_header[28..32].copy_from_slice(&status.to_le_bytes());
-        usb_header[32..36].copy_from_slice(&urb_len.to_le_bytes());
-        usb_header[36..40].copy_from_slice(&urb_len.to_le_bytes());
+            let transfer_type = match &urb.transfer_type {
+                USBTransferType::Bulk => 3,
+                USBTransferType::Control => 2,
+                USBTransferType::Interrupt => 1,
+                USBTransferType::Isochronous => 0,
+            };
+            let function_id = urb.usb_function.clone() as u16;
 
-        if is_control && urb.data.len() >= 8 {
-            usb_header[40..48].copy_from_slice(&urb.data[0..8]);
+            let header = USBPcapPacketHeader {
+                header_length: size as u16,
+                data_length: urb.data.len() as u32,
+                transfer: transfer_type,
+                io_packet_id: urb.index as u64,
+                bus: 0,
+                device: urb.device_number as u16,
+                endpoint: urb.endpoint_number,
+                usb_status: 0,
+                info: 0,
+                urb_function: function_id,
+            };
+
+            let mut packet_bytes = header.as_bytes().to_vec();
+            if header.transfer == 2 {
+                let control_type = match urb.control_stage {
+                    None => { None }
+                    Some(USBControlStage::Data) => { Some(1) }
+                    Some(USBControlStage::Setup) => { Some(0) }
+                    Some(USBControlStage::Status) => { Some(2) }
+                    Some(USBControlStage::Complete) => { Some(3) }
+                };
+                let mut additional = vec![control_type.unwrap() as u8];
+                packet_bytes.append(&mut additional);
+            }
+            packet_bytes.append(&mut urb.data.clone());
+
+            let packet = EnhancedPacketBlock {
+                interface_id: 0,
+                timestamp: Duration::from_nanos(urb.index_ns as u64),
+                original_len: packet_bytes.len() as u32,
+                data: Cow::Owned(packet_bytes),
+                options: vec![],
+            };
+            self.writer.write_pcapng_block(packet).expect("Must be able to write packet");
         }
-        
-        let header_len = 64;
-        let packet_len = header_len + urb.data.len() as u32;
-        
-        // PCAP Packet Header
-        self.writer.write_all(&timestamp_sec.to_le_bytes())?;
-        self.writer.write_all(&timestamp_usec.to_le_bytes())?;
-        self.writer.write_all(&packet_len.to_le_bytes())?;
-        self.writer.write_all(&packet_len.to_le_bytes())?;
-        
-        // PCAP Packet Data (USB-Linux header + USB Data)
-        self.writer.write_all(&usb_header)?;
-        self.writer.write_all(&urb.data)?;
-        
         Ok(())
     }
 }

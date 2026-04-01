@@ -2,10 +2,12 @@ use std::cmp::PartialEq;
 use anyhow::{Context, Result};
 use csv::StringRecord;
 use std::collections::HashMap;
+use std::fmt;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use crate::usb_request_block::{USBDirection, USBRequestBlock, USBSpeed};
+use strum_macros::Display;
+use crate::usb_request_block::{USBControlStage, USBDirection, USBFunction, USBRequestBlock, USBSpeed, USBTransferType};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CaptureState {
@@ -27,7 +29,7 @@ pub enum ConnectionState {
     Disconnected,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Display)]
 pub enum OperationType {
     GetStringDescriptor,
     NegativeAcknowledge,
@@ -118,6 +120,7 @@ impl <'a> USBPacket<'a> {
     pub fn new(
         record: StringRecord,
         current_offset: u64,
+        binary_reader: &mut BufReader<File>
     ) -> Self {
         // First column is the level, this indicates if the record is nested below the prior record
         let level: u8 = record[0].parse().unwrap();
@@ -200,6 +203,15 @@ impl <'a> USBPacket<'a> {
 
         let children : Vec<&USBPacket> = Vec::new();
 
+        let data = if length.is_some() {
+            binary_reader.seek(SeekFrom::Start(current_offset)).unwrap();
+            let mut data = vec![0u8; length.unwrap() as usize];
+            binary_reader.read_exact(data.as_mut_slice()).expect("Should read exact data");
+            Some(data)
+        } else {
+            None
+        };
+
         USBPacket {
             level,
             index,
@@ -217,7 +229,7 @@ impl <'a> USBPacket<'a> {
             children,
             stall,
             operation,
-            data: None
+            data
         }
     }
 
@@ -287,6 +299,27 @@ fn operation_to_operation_type(operation: String) -> OperationType {
     }
 }
 
+pub fn total_phase_to_usb_function(op: OperationType) -> USBFunction {
+    match op {
+        OperationType::GetDeviceDescriptor => {
+            USBFunction::GetDescriptorFromDevice
+        }
+        OperationType::SetConfiguration => {
+            USBFunction::SelectConfiguration
+        }
+        OperationType::OutputPacket => {
+            USBFunction::BulkOrInterruptTransfer
+        }
+        OperationType::ControlTransfer => {
+            USBFunction::ControlTransfer
+        }
+        OperationType::GetConfigurationDescriptor => {
+            USBFunction::GetConfiguration
+        }
+        _ => USBFunction::Unknown,
+    }
+}
+
 impl TotalPhaseReader {
     pub(crate) fn new(file_basename: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let bin_path = format!("{}.bin", file_basename);
@@ -314,13 +347,9 @@ impl TotalPhaseReader {
         let mut offset: u64 = 0;
         let mut packets: Vec<USBPacket> = Vec::new();
         for result in self.csv_reader.records() {
-            let mut record = USBPacket::new(result?, offset);
+            let record = USBPacket::new(result?, offset, &mut self.binary_reader);
 
             if let Some(length) = record.length {
-                self.binary_reader.seek(SeekFrom::Start(record.data_offset.unwrap()))?;
-                let mut data: Vec<u8> = Vec::with_capacity(record.length.unwrap() as usize);
-                self.binary_reader.read(data.as_mut_slice())?;
-                record.data = Some(data);
                 offset = offset + length;
             }
 
@@ -351,8 +380,11 @@ impl TotalPhaseReader {
                         device_number: result.device_id.unwrap(),
                         endpoint_number: result.endpoint_id.unwrap(),
                         index: result.index as u32,
-                        index_ns: 0,
-                        duration_ns: 0,
+                        transfer_type: USBTransferType::Bulk,
+                        control_stage: None,
+                        index_ns: result.timestamp,
+                        duration_ns: result.duration_us.unwrap_or(0),
+                        usb_function: total_phase_to_usb_function(result.operation),
                     })
                 },
                 OperationType::OutputPacket => {
@@ -363,8 +395,56 @@ impl TotalPhaseReader {
                         device_number: result.device_id.unwrap(),
                         endpoint_number: result.endpoint_id.unwrap(),
                         index: result.index as u32,
-                        index_ns: 0,
-                        duration_ns: 0,
+                        transfer_type: USBTransferType::Bulk,
+                        control_stage: None,
+                        index_ns: result.timestamp,
+                        duration_ns: result.duration_us.unwrap_or(0),
+                        usb_function: total_phase_to_usb_function(result.operation),
+                    })
+                },
+                OperationType::SetupTransaction => {
+                    Some(USBRequestBlock {
+                        direction: USBDirection::DirectionOut,
+                        data: result.data.unwrap(),
+                        speed: result.speed,
+                        device_number: result.device_id.unwrap(),
+                        endpoint_number: result.endpoint_id.unwrap(),
+                        index: result.index as u32,
+                        transfer_type: USBTransferType::Control,
+                        control_stage: Some(USBControlStage::Setup),
+                        index_ns: result.timestamp,
+                        duration_ns: result.duration_us.unwrap_or(0),
+                        usb_function: total_phase_to_usb_function(result.operation),
+                    })
+                },
+                OperationType::Data0Packet => {
+                    Some(USBRequestBlock {
+                        direction: USBDirection::DirectionOut,
+                        data: result.data.unwrap(),
+                        speed: result.speed,
+                        device_number: result.device_id.unwrap(),
+                        endpoint_number: result.endpoint_id.unwrap(),
+                        index: result.index as u32,
+                        transfer_type: USBTransferType::Control,
+                        control_stage: Some(USBControlStage::Data),
+                        index_ns: result.timestamp,
+                        duration_ns: result.duration_us.unwrap_or(0),
+                        usb_function: total_phase_to_usb_function(result.operation),
+                    })
+                },
+                OperationType::AcknowledgePacket => {
+                    Some(USBRequestBlock {
+                        direction: USBDirection::DirectionOut,
+                        data: result.data.unwrap(),
+                        speed: result.speed,
+                        device_number: result.device_id.unwrap(),
+                        endpoint_number: result.endpoint_id.unwrap(),
+                        index: result.index as u32,
+                        transfer_type: USBTransferType::Control,
+                        control_stage: Some(USBControlStage::Complete),
+                        index_ns: result.timestamp,
+                        duration_ns: result.duration_us.unwrap_or(0),
+                        usb_function: total_phase_to_usb_function(result.operation),
                     })
                 }
                 _ => None

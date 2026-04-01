@@ -6,7 +6,7 @@ mod pcap_writer;
 use clap::{arg, Command};
 use std::fs::File;
 use std::io::BufWriter;
-use crate::pcap_writer::PcapWriter;
+use crate::pcap_writer::USBPcapWriter;
 
 fn cli() -> Command {
     Command::new("demuxusb-rs")
@@ -60,11 +60,11 @@ fn main() -> Result<()> {
 
             let file = File::create(output_path)?;
             let writer = BufWriter::new(file);
-            let mut pcap_writer = PcapWriter::new(writer)?;
+            let mut pcap_writer = USBPcapWriter::new(writer)?;
 
-            for p in packets.unwrap() {
-                let urb = pcap_writer.write_urb(&p);
-            }
+
+        pcap_writer.write_urbs(&packets.unwrap());
+
         }
 
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachable!()

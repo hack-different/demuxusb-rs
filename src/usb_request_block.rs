@@ -9,6 +9,69 @@ pub enum USBDirection {
     DirectionOut,
 }
 
+#[derive(Debug)]
+pub enum USBTransferType {
+    Control,
+    Bulk,
+    Isochronous,
+    Interrupt,
+}
+
+#[repr(u16)]
+#[derive(Debug, Clone)]
+pub enum USBFunction {
+UsbDefaultMaxPacket =                 64,
+SelectConfiguration =           0x0000,
+SelectInterface =          0x0001,
+ AbortPipe =          0x0002,
+ TakeFrameLengthControl =         0x0003,
+ ReleaseFrameLengthControl =      0x0004,
+ GetFrameLength =        0x0005,
+ SetFrameLength =     0x0006,
+ GetCurrentFrameNumber =    0x0007,
+ ControlTransfer =   0x0008,
+ BulkOrInterruptTransfer =  0x0009,
+ IsochTransfer =  0x000A,
+ GetDescriptorFromDevice = 0x000B,
+ SetDescriptorToDevice =      0x000C,
+SetFeatureToDevice =     0x000D,
+ SetFeatureToInterface =  0x000E,
+ SetFeatureToEndpoint =    0x000F,
+ ClearFeatureToDevice =   0x0010,
+ ClearFeatureToInterface =   0x0011,
+ ClearFeatureToEndpoint =  0x0012,
+ GetStatusFromDevice =  0x0013,
+ GetStatusFromInterface =        0x0014,
+ GetStatusFromEndpoint =  0x0015,
+ VendorDevice =        0x0017,
+ VendorInterface =    0x0018,
+ VendorEndpoint =    0x0019,
+ ClassDevice =          0x001A,
+ ClassInterface =         0x001B,
+ ClassEndpoint =    0x001C,
+ SyncResetPipeAndClearStall = 0x001E,
+ ClassOther =  0x001F,
+ VendorOther =  0x0020,
+ GetStatusFromOther =   0x0021,
+ ClearFeatureToOther =   0x0022,
+UrbFunctionSetFeatureToOther =   0x0023,
+GetDescriptorFromEndpoint = 0x0024,
+SetDescriptorToEndpoint =   0x0025,
+GetConfiguration =    0x0026,
+ GetInterface =    0x0027,
+GetDescriptorFromInterface =  0x0028,
+SetDescriptorToInterface = 0x0029,
+    Unknown,
+}
+
+#[derive(Debug)]
+pub enum USBControlStage {
+    Setup,
+    Data,
+    Status,
+    Complete
+}
+
 pub enum USBClassCode {
     PerInterface = 0x00,
     Audio = 0x01,
@@ -168,6 +231,9 @@ pub struct USBRequestBlock {
     pub index: u32,
     pub index_ns: u64,
     pub duration_ns: u64,
+    pub transfer_type: USBTransferType,
+    pub control_stage: Option<USBControlStage>,
+    pub usb_function: USBFunction,
     pub data: Vec<u8>,
 }
 
