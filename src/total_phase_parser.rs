@@ -1,22 +1,57 @@
+use std::cmp::PartialEq;
 use anyhow::{Context, Result};
 use csv::StringRecord;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
-use crate::usb_request_block::USBSpeed;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use crate::usb_request_block::{USBDirection, USBRequestBlock, USBSpeed};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+pub enum CaptureState {
+    Stopped,
+    Suspended,
+    Started,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ResetType {
+    KeepAliveTargetDisconnected,
+    ChirpJTinyJ,
+    TargetDisconnected,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ConnectionState {
+    Connected,
+    Disconnected,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum OperationType {
     GetStringDescriptor,
+    NegativeAcknowledge,
     StartOfFramePacket,
+    SetIdle,
     InputPacket,
+    GetHubDescriptor,
     SetupTransaction,
+    SetPortFeature,
     OutputTransaction,
     AcknowledgePacket,
     Data1Packet,
+    SetOutputReport,
+    GetHubStatus,
+    OutputDataNegativeAcknowledge,
+    InputReport,
+    ClearPortFeature,
+    HubStatus,
     SetAddress,
+    InputNegativeAcknowledge,
+    GetPortStatus,
     GetDeviceDescriptor,
+    GetDeviceStatus,
+    GetReportDescriptor,
     InputTransaction,
     ControlTransfer,
     GetDeviceQualifierDescriptor,
@@ -27,14 +62,11 @@ pub enum OperationType {
     SetupPacket,
     Comment,
     CaptureStartedSequential,
-    ControlTransferStall,
-    HostConnected,
-    FullSpeedTransition,
-    LowSpeedTransition,
-    ResetTargetDisconnected,
-    ResetKeepAliveTargetDisconnected,
-    Suspend,
-    ResetChirpJTinyJ,
+    HostState(ConnectionState),
+    SpeedTransition(USBSpeed),
+    Reset(ResetType),
+    CaptureState(CaptureState),
+    StallPacket,
     Unknown
 }
 
@@ -61,7 +93,7 @@ type DeviceId = u8;
 type EndpointId = u8;
 
 #[derive(Debug)]
-pub struct USBPacket {
+pub struct USBPacket<'a> {
     pub level: u8,
     pub speed: USBSpeed,
     pub index: u64,
@@ -74,13 +106,15 @@ pub struct USBPacket {
     pub operation: OperationType,
     pub extra: Option<String>,
     pub short_data: DataRecord,
+    pub data: Option<Vec<u8>>,
     pub summary: String,
+    pub stall: bool,
     pub data_offset: Option<u64>,
-    pub children: Vec<USBPacket>,
+    pub children: Vec<&'a USBPacket<'a>>,
 }
 
 
-impl USBPacket {
+impl <'a> USBPacket<'a> {
     pub fn new(
         record: StringRecord,
         current_offset: u64,
@@ -127,14 +161,19 @@ impl USBPacket {
 
         let mut extra: Option<String> = None;
         let operation_string: String = record[9].parse().unwrap();
-        let operation_name = if operation_string.contains("[") && operation_string.contains("]") {
+        let mut operation_name = if operation_string.contains("[") && operation_string.contains("]") {
             let parts: Vec<&str> = operation_string.split("[").collect();
             extra = Some(parts[1].strip_suffix("]").unwrap().trim().to_string());
             parts[0].trim().to_string()
         } else {
             operation_string.trim().to_string()
         };
+        let mut stall = operation_name.contains("(STALL)");
+        operation_name = operation_name.replace("(STALL)", "").trim().to_string();
         let operation = operation_to_operation_type(operation_name);
+        if operation == OperationType::StallPacket {
+            stall = true;
+        }
 
         // Data parsing rules, if nothing then nothing, if ends with "..." then partial, otherwise data
         let short_data: DataRecord = match record.get(10) {
@@ -159,7 +198,7 @@ impl USBPacket {
             Some(_) => Some(current_offset),
         };
 
-        let children : Vec<USBPacket> = Vec::new();
+        let children : Vec<&USBPacket> = Vec::new();
 
         USBPacket {
             level,
@@ -176,13 +215,16 @@ impl USBPacket {
             summary,
             data_offset,
             children,
-            operation
+            stall,
+            operation,
+            data: None
         }
     }
 
-    pub fn add_child(&mut self, child: USBPacket) {
+    pub fn add_child(&mut self, child: &'a USBPacket) {
         self.children.push(child);
     }
+
 
     pub fn dict_data(&self) -> HashMap<&str, String> {
         let mut m = HashMap::new();
@@ -202,6 +244,11 @@ fn operation_to_operation_type(operation: String) -> OperationType {
         "SETUP txn" => OperationType::SetupTransaction,
         "OUT tx" => OperationType::OutputTransaction,
         "OUT txn" => OperationType::OutputTransaction,
+        "Get Hub Descriptor" => OperationType::GetHubDescriptor,
+        "Set Port Feature" => OperationType::SetPortFeature,
+        "Get Hub Status" => OperationType::GetHubStatus,
+        "OUT-DATA-NAK" => OperationType::OutputDataNegativeAcknowledge,
+        "Get Device Status" => OperationType::GetDeviceStatus,
         "IN txn" => OperationType::InputTransaction,
         "Control Transfer" => OperationType::ControlTransfer,
         "Get String Descriptor" => OperationType::GetStringDescriptor,
@@ -212,19 +259,29 @@ fn operation_to_operation_type(operation: String) -> OperationType {
         "DATA1 packet" => OperationType::Data1Packet,
         "OUT packet" => OperationType::OutputPacket,
         "IN packet" => OperationType::InputPacket,
+        "Set Idle" => OperationType::SetIdle,
+        "Hub Status" => OperationType::HubStatus,
+        "Get Port Status" => OperationType::GetPortStatus,
         "ACK packet" => OperationType::AcknowledgePacket,
+        "Clear Port Feature" => OperationType::ClearPortFeature,
         "SETUP packet" => OperationType::SetupPacket,
         "Comment" => OperationType::Comment,
-        "<Host connected>" => OperationType::HostConnected,
-        "<Full-speed>" => OperationType::FullSpeedTransition,
-        "<Reset> / <Target disconnected>" => OperationType::ResetTargetDisconnected,
+        "NAK packet" => OperationType::NegativeAcknowledge,
+        "IN-NAK" => OperationType::InputNegativeAcknowledge,
+        "Get Report Descriptor" => OperationType::GetReportDescriptor,
+        "<Host connected>" => OperationType::HostState(ConnectionState::Connected),
+        "<Full-speed>" => OperationType::SpeedTransition(USBSpeed::SpeedFull),
+        "<Reset> / <Target disconnected>" => OperationType::Reset(ResetType::TargetDisconnected),
+        "Input Report" => OperationType::InputReport,
         "Capture started (Sequential)" => OperationType::CaptureStartedSequential,
-        "<Low-speed>" => OperationType::LowSpeedTransition,
-        "<Reset> / <Keep-alive> / <Target disconnected>" => OperationType::ResetKeepAliveTargetDisconnected,
-        "<Suspend>" => OperationType::Suspend,
-        "<Reset> / <Chirp J> / <Tiny J>" => OperationType::ResetChirpJTinyJ,
+        "<Low-speed>" => OperationType::SpeedTransition(USBSpeed::SpeedLow),
+        "<Reset> / <Keep-alive> / <Target disconnected>" => OperationType::Reset(ResetType::KeepAliveTargetDisconnected),
+        "<Suspend>" => OperationType::CaptureState(CaptureState::Suspended),
+        "Capture stopped" => OperationType::CaptureState(CaptureState::Stopped),
+        "Set Output Report" => OperationType::SetOutputReport,
+        "<Reset> / <Chirp J> / <Tiny J>" => OperationType::Reset(ResetType::ChirpJTinyJ),
         "SOF packet" => OperationType::StartOfFramePacket,
-        "Control Transfer (STALL)" => OperationType::ControlTransferStall,
+        "STALL packet" => OperationType::StallPacket,
         "" => OperationType::Unknown,
         _ => panic!("Unknown operation type: {}", operation)
     }
@@ -257,14 +314,66 @@ impl TotalPhaseReader {
         let mut offset: u64 = 0;
         let mut packets: Vec<USBPacket> = Vec::new();
         for result in self.csv_reader.records() {
-            let record = USBPacket::new(result?, offset);
+            let mut record = USBPacket::new(result?, offset);
 
             if let Some(length) = record.length {
+                self.binary_reader.seek(SeekFrom::Start(record.data_offset.unwrap()))?;
+                let mut data: Vec<u8> = Vec::with_capacity(record.length.unwrap() as usize);
+                self.binary_reader.read(data.as_mut_slice())?;
+                record.data = Some(data);
                 offset = offset + length;
             }
+
             packets.push(record);
         }
         Ok(packets)
+    }
+
+
+    pub fn read_data(&mut self, packet: USBPacket) -> Option<Vec<u8>> {
+        if packet.data_offset.is_none() { return None; }
+        self.binary_reader.seek(SeekFrom::Start(packet.data_offset.unwrap())).expect("Must be valid");
+        let mut result: Vec<u8> = Vec::with_capacity(packet.length.unwrap() as usize);
+        self.binary_reader.read(&mut result).expect("Must be read");
+        return Some(result);
+    }
+
+    pub fn usb_request_blocks(&mut self) -> Result<Vec<USBRequestBlock>, Box<dyn Error>> {
+        let mut results: Vec<USBRequestBlock> = Vec::new();
+        let packets = self.read().unwrap();
+        for result in packets {
+            let item = match result.operation {
+                OperationType::InputPacket => {
+                    Some(USBRequestBlock {
+                        direction: USBDirection::DirectionIn,
+                        data: result.data.unwrap(),
+                        speed: result.speed,
+                        device_number: result.device_id.unwrap(),
+                        endpoint_number: result.endpoint_id.unwrap(),
+                        index: result.index as u32,
+                        index_ns: 0,
+                        duration_ns: 0,
+                    })
+                },
+                OperationType::OutputPacket => {
+                    Some(USBRequestBlock {
+                        direction: USBDirection::DirectionOut,
+                        data: result.data.unwrap(),
+                        speed: result.speed,
+                        device_number: result.device_id.unwrap(),
+                        endpoint_number: result.endpoint_id.unwrap(),
+                        index: result.index as u32,
+                        index_ns: 0,
+                        duration_ns: 0,
+                    })
+                }
+                _ => None
+            };
+            if item.is_some() {
+                results.push(item.unwrap());
+            }
+        }
+        Ok(results)
     }
 }
 
@@ -289,6 +398,15 @@ fn duration_from_totalphase_duration(ts: Option<&str>) -> Option<u64> {
     if let Some(ts) = ts {
         if ts == "" {
             return None
+        }
+        else if ts.ends_with(" s") {
+            let parts: Vec<&str> = ts.strip_suffix(" s").expect("Tested for suffix").split('.').collect();
+            let s_part: u32 = parts[0].parse().unwrap();
+            let ms_part: u32 = parts[1].parse().unwrap();
+            let ns_part: u32 = parts[2].parse().unwrap();
+            let us_part: u32 = parts[3].parse().unwrap();
+            let total: u64 = ((s_part * 1000 * 1000 * 1000) + us_part + (1000 + ns_part) + (1000 + ms_part * 1000)) as u64;
+            return Some(total);
         }
         else if ts.ends_with(" ms") {
             let parts: Vec<&str> = ts.strip_suffix(" ms").expect("Tested for suffix").split('.').collect();

@@ -43,7 +43,8 @@ fn main() -> Result<()> {
                 filebase = filebase.strip_suffix(".bin").unwrap().to_string();
             }
 
-            let packets = total_phase_parser::totalphase_reader(&filebase).unwrap().read();
+            let mut reader = total_phase_parser::totalphase_reader(&filebase).unwrap();
+            let packets = reader.read();
             for p in packets.unwrap() {
                 println!("{:?}", p.dict_data());
             }
@@ -55,14 +56,14 @@ fn main() -> Result<()> {
             let output_path = sub_matches.get_one::<String>("OUTPUT").expect("required");
 
             let mut reader = total_phase_parser::totalphase_reader(filebase).unwrap();
-            let packets = reader.read();
+            let packets = reader.usb_request_blocks();
 
             let file = File::create(output_path)?;
             let writer = BufWriter::new(file);
             let mut pcap_writer = PcapWriter::new(writer)?;
 
-            for p in packets {
-
+            for p in packets.unwrap() {
+                let urb = pcap_writer.write_urb(&p);
             }
         }
 
