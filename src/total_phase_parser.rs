@@ -16,10 +16,27 @@ pub enum CaptureState {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub enum TriggerType {
+    Manual,
+    ManualOrUSB2,
+    ManualOrUSB3,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum VBusState {
+    Present,
+    Absent,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum ResetType {
     KeepAliveTargetDisconnected,
+    KeepaliveChirpKTinyK,
     ChirpJTinyJ,
+    ChipKTinyK,
     TargetDisconnected,
+    LowFrequencyPeriodicSignalling,
+    Default
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -28,18 +45,38 @@ pub enum ConnectionState {
     Disconnected,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum USB3Signal {
+    ChipK,
+    TinyK,
+    ChirpK,
+    TinyJ,
+    ChirpJ,
+}
+
 #[derive(Debug, PartialEq, Eq, Display)]
 pub enum OperationType {
+    LinkTrainingStatusStateMachine,
     GetStringDescriptor,
+    LFPSUnknown,
+    NotYetPacket,
+    InPacket,
+    CorruptedPacket,
+    PingAcknowledge,
+    PingPacket,
     NegativeAcknowledge,
     StartOfFramePacket,
     SetIdle,
     InputPacket,
+    SetInterface,
+    TargetState(ConnectionState),
+    Trigger(TriggerType),
     GetHubDescriptor,
     SetupTransaction,
     SetPortFeature,
     OutputTransaction,
     AcknowledgePacket,
+LFPSPolling,
     Data1Packet,
     SetOutputReport,
     GetHubStatus,
@@ -62,10 +99,11 @@ pub enum OperationType {
     GetConfigurationDescriptor,
     SetupPacket,
     Comment,
-    CaptureStartedSequential,
+    USB3Signal(USB3Signal),
     HostState(ConnectionState),
     SpeedTransition(USBSpeed),
     Reset(ResetType),
+    VBus(VBusState),
     CaptureState(CaptureState),
     StallPacket,
     Unknown,
@@ -163,7 +201,11 @@ impl<'a> USBPacket<'a> {
         let operation_string: String = record[9].parse().unwrap();
         let mut operation_name = if operation_string.contains("[") && operation_string.contains("]") {
             let parts: Vec<&str> = operation_string.split("[").collect();
-            extra = Some(parts[1].strip_suffix("]").unwrap().trim().to_string());
+            if parts.len() > 1 {
+                extra = Some(parts[1].trim().strip_suffix("]").expect(&format!("Strip ] {operation_string}")).trim().to_string());
+            } else {
+                extra = None;
+            }
             parts[0].trim().to_string()
         } else {
             operation_string.trim().to_string()
@@ -249,16 +291,20 @@ impl<'a> USBPacket<'a> {
 fn operation_to_operation_type(operation: String) -> OperationType {
     match operation.as_str() {
         "Set Address" => OperationType::SetAddress,
+        "LTSSM Transition" => OperationType::LinkTrainingStatusStateMachine,
         "Get Device Descriptor" => OperationType::GetDeviceDescriptor,
         "SETUP txn" => OperationType::SetupTransaction,
         "OUT tx" => OperationType::OutputTransaction,
         "OUT txn" => OperationType::OutputTransaction,
         "Get Hub Descriptor" => OperationType::GetHubDescriptor,
         "Set Port Feature" => OperationType::SetPortFeature,
+        "Set Interface" => OperationType::SetInterface,
+        "Detach" => OperationType::TargetState(ConnectionState::Disconnected),
         "Get Hub Status" => OperationType::GetHubStatus,
         "OUT-DATA-NAK" => OperationType::OutputDataNegativeAcknowledge,
         "Get Device Status" => OperationType::GetDeviceStatus,
         "IN txn" => OperationType::InputTransaction,
+        "<Reset>" => OperationType::Reset(ResetType::Default),
         "Control Transfer" => OperationType::ControlTransfer,
         "Get String Descriptor" => OperationType::GetStringDescriptor,
         "Get Device Qualifier Descriptor" => OperationType::GetDeviceQualifierDescriptor,
@@ -275,22 +321,49 @@ fn operation_to_operation_type(operation: String) -> OperationType {
         "Clear Port Feature" => OperationType::ClearPortFeature,
         "SETUP packet" => OperationType::SetupPacket,
         "Comment" => OperationType::Comment,
+        "<HNP> / <Full-speed>" => OperationType::SpeedTransition(USBSpeed::SpeedFull),
+        "<LFPS Polling/U1 Exit>" => OperationType::LFPSPolling,
+        "<SuperSpeed Host Connected>" => OperationType::HostState(ConnectionState::Connected),
+        "<LFPS Reset>" => OperationType::Reset(ResetType::LowFrequencyPeriodicSignalling),
+        "<LFPS Polling>" => OperationType::LFPSPolling,
+        "<LFPS Unknown>" => OperationType::LFPSUnknown,
+        "<High-speed>" => OperationType::SpeedTransition(USBSpeed::SpeedHigh),
+        "<Manual Trigger>" => OperationType::Trigger(TriggerType::Manual),
+        "OUT txn (NAK)" => OperationType::NegativeAcknowledge,
+        "<VBus Absent>" => OperationType::VBus(VBusState::Absent),
+        "<Host disconnected>" => OperationType::HostState(ConnectionState::Disconnected),
+        "<Reset> / <Keep-alive> / <Chirp K> / <Tiny K>" => OperationType::Reset(ResetType::KeepaliveChirpKTinyK),
+        "PING-ACK" => OperationType::PingAcknowledge,
+        "<Reset> / <Chirp K> / <Tiny K>" => OperationType::Reset(ResetType::ChipKTinyK),
+        "<Chirp K>" => OperationType::USB3Signal(USB3Signal::ChirpK),
+        "<Manual Trigger or USB2 Trigger>" => OperationType::Trigger(TriggerType::ManualOrUSB2),
+        "<Manual Trigger or USB3 Trigger>" => OperationType::Trigger(TriggerType::ManualOrUSB3),
+        "<VBus Present>" => OperationType::VBus(VBusState::Present),
         "NAK packet" => OperationType::NegativeAcknowledge,
+        "<Chirp J>" => OperationType::USB3Signal(USB3Signal::ChirpJ),
+        "<SuperSpeed Host Disconnected>" => OperationType::HostState(ConnectionState::Disconnected),
         "IN-NAK" => OperationType::InputNegativeAcknowledge,
         "Get Report Descriptor" => OperationType::GetReportDescriptor,
         "<Host connected>" => OperationType::HostState(ConnectionState::Connected),
         "<Full-speed>" => OperationType::SpeedTransition(USBSpeed::SpeedFull),
         "<Reset> / <Target disconnected>" => OperationType::Reset(ResetType::TargetDisconnected),
         "Input Report" => OperationType::InputReport,
-        "Capture started (Sequential)" => OperationType::CaptureStartedSequential,
+        "PING packet" => OperationType::PingPacket,
+        "CORRUPTED packet" => OperationType::CorruptedPacket,
+        "OUT txn (NYET)" => OperationType::OutputTransaction,
+        "NYET packet" => OperationType::NotYetPacket,
+        "Capture started (Sequential)" => OperationType::CaptureState(CaptureState::Started),
         "<Low-speed>" => OperationType::SpeedTransition(USBSpeed::SpeedLow),
         "<Reset> / <Keep-alive> / <Target disconnected>" => OperationType::Reset(ResetType::KeepAliveTargetDisconnected),
         "<Suspend>" => OperationType::CaptureState(CaptureState::Suspended),
+        "IN" => OperationType::InPacket,
         "Capture stopped" => OperationType::CaptureState(CaptureState::Stopped),
         "Set Output Report" => OperationType::SetOutputReport,
         "<Reset> / <Chirp J> / <Tiny J>" => OperationType::Reset(ResetType::ChirpJTinyJ),
         "SOF packet" => OperationType::StartOfFramePacket,
+        "<SuperSpeed Target Connected>" => OperationType::TargetState(ConnectionState::Connected),
         "STALL packet" => OperationType::StallPacket,
+        "Capture started (Aggregate)" => OperationType::CaptureState(CaptureState::Started),
         "" => OperationType::Unknown,
         _ => panic!("Unknown operation type: {}", operation)
     }
@@ -395,8 +468,8 @@ impl TotalPhaseReader {
                         direction: USBDirection::DirectionOut,
                         data: result.data.unwrap(),
                         speed: result.speed,
-                        device_number: result.device_id.unwrap(),
-                        endpoint_number: result.endpoint_id.unwrap(),
+                        device_number: result.device_id.unwrap_or_default(),
+                        endpoint_number: result.endpoint_id.unwrap_or_default(),
                         index: result.index as u32,
                         transfer_type: USBTransferType::Control,
                         control_stage: Some(USBControlStage::Setup),
