@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::*; // Bring the parent module's code into scope
+    // Bring the parent module's code into scope
     use demuxusb_rs::total_phase_parser;
     use std::fs;
     #[test]

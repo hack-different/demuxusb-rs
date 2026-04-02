@@ -1,6 +1,6 @@
+use bitflags::bitflags;
 use std::iter::Map;
 use uuid::Uuid;
-use bitflags::bitflags;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum USBDirection {
@@ -20,48 +20,48 @@ pub enum USBTransferType {
 #[repr(u16)]
 #[derive(Debug, Clone)]
 pub enum USBFunction {
-UsbDefaultMaxPacket =                 64,
-SelectConfiguration =           0x0000,
-SelectInterface =          0x0001,
- AbortPipe =          0x0002,
- TakeFrameLengthControl =         0x0003,
- ReleaseFrameLengthControl =      0x0004,
- GetFrameLength =        0x0005,
- SetFrameLength =     0x0006,
- GetCurrentFrameNumber =    0x0007,
- ControlTransfer =   0x0008,
- BulkOrInterruptTransfer =  0x0009,
+    UsbDefaultMaxPacket = 64,
+    SelectConfiguration = 0x0000,
+    SelectInterface = 0x0001,
+    AbortPipe = 0x0002,
+    TakeFrameLengthControl = 0x0003,
+    ReleaseFrameLengthControl = 0x0004,
+    GetFrameLength = 0x0005,
+    SetFrameLength = 0x0006,
+    GetCurrentFrameNumber = 0x0007,
+    ControlTransfer = 0x0008,
+    BulkOrInterruptTransfer = 0x0009,
     ControlTransferEx = 0x0032,
- IsochTransfer =  0x000A,
- GetDescriptorFromDevice = 0x000B,
- SetDescriptorToDevice =      0x000C,
-SetFeatureToDevice =     0x000D,
- SetFeatureToInterface =  0x000E,
- SetFeatureToEndpoint =    0x000F,
- ClearFeatureToDevice =   0x0010,
- ClearFeatureToInterface =   0x0011,
- ClearFeatureToEndpoint =  0x0012,
- GetStatusFromDevice =  0x0013,
- GetStatusFromInterface =        0x0014,
- GetStatusFromEndpoint =  0x0015,
- VendorDevice =        0x0017,
- VendorInterface =    0x0018,
- VendorEndpoint =    0x0019,
- ClassDevice =          0x001A,
- ClassInterface =         0x001B,
- ClassEndpoint =    0x001C,
- SyncResetPipeAndClearStall = 0x001E,
- ClassOther =  0x001F,
- VendorOther =  0x0020,
- GetStatusFromOther =   0x0021,
- ClearFeatureToOther =   0x0022,
-UrbFunctionSetFeatureToOther =   0x0023,
-GetDescriptorFromEndpoint = 0x0024,
-SetDescriptorToEndpoint =   0x0025,
-GetConfiguration =    0x0026,
- GetInterface =    0x0027,
-GetDescriptorFromInterface =  0x0028,
-SetDescriptorToInterface = 0x0029,
+    IsochTransfer = 0x000A,
+    GetDescriptorFromDevice = 0x000B,
+    SetDescriptorToDevice = 0x000C,
+    SetFeatureToDevice = 0x000D,
+    SetFeatureToInterface = 0x000E,
+    SetFeatureToEndpoint = 0x000F,
+    ClearFeatureToDevice = 0x0010,
+    ClearFeatureToInterface = 0x0011,
+    ClearFeatureToEndpoint = 0x0012,
+    GetStatusFromDevice = 0x0013,
+    GetStatusFromInterface = 0x0014,
+    GetStatusFromEndpoint = 0x0015,
+    VendorDevice = 0x0017,
+    VendorInterface = 0x0018,
+    VendorEndpoint = 0x0019,
+    ClassDevice = 0x001A,
+    ClassInterface = 0x001B,
+    ClassEndpoint = 0x001C,
+    SyncResetPipeAndClearStall = 0x001E,
+    ClassOther = 0x001F,
+    VendorOther = 0x0020,
+    GetStatusFromOther = 0x0021,
+    ClearFeatureToOther = 0x0022,
+    UrbFunctionSetFeatureToOther = 0x0023,
+    GetDescriptorFromEndpoint = 0x0024,
+    SetDescriptorToEndpoint = 0x0025,
+    GetConfiguration = 0x0026,
+    GetInterface = 0x0027,
+    GetDescriptorFromInterface = 0x0028,
+    SetDescriptorToInterface = 0x0029,
     Unknown,
 }
 
@@ -70,9 +70,10 @@ pub enum USBControlStage {
     Setup,
     Data,
     Status,
-    Complete
+    Complete,
 }
 
+#[derive(Debug)]
 pub enum USBClassCode {
     PerInterface = 0x00,
     Audio = 0x01,
@@ -92,9 +93,10 @@ pub enum USBClassCode {
     Wireless = 0xe0,
     Miscellaneous = 0xef,
     Application = 0xfe,
-    VendorSpecific = 0xff
+    VendorSpecific = 0xff,
 }
 
+#[derive(Debug)]
 pub enum USBDescriptorType {
     Device = 0x01,
     Configuration = 0x02,
@@ -109,9 +111,10 @@ pub enum USBDescriptorType {
     Physical = 0x23,
     Hub = 0x29,
     SuperspeedHub = 0x2a,
-    SuperSpeedEndpointCompanion = 0x30
+    SuperSpeedEndpointCompanion = 0x30,
 }
 
+#[derive(Debug)]
 pub enum USBDescriptor {
     Device(USBDeviceDescriptor),
     Configuration(USBConfigDescriptor),
@@ -125,6 +128,7 @@ pub enum USBDescriptor {
     Report(u8),
 }
 
+#[derive(Debug)]
 enum USBBinaryObjectStoreType {
     LibusbBtWirelessUsbDeviceCapability = 1,
     LibusbBtUsb20Extension = 2,
@@ -132,26 +136,26 @@ enum USBBinaryObjectStoreType {
     LibusbBtContainerId = 4,
 }
 
-const DEVICE_SIZE: u8   =        18;
-const CONFIG_SIZE  : u8    =     9;
-const INTERFACE_SIZE : u8   =    9;
-const ENDPOINT_SIZE  : u8  =     7;
-const ENDPOINT_AUDIO_SIZE : u8   =   9;
-const HUB_NONVAR_SIZE : u8 =     7;
-const SS_ENDPOINT_COMPANION_SIZE: u8 =   6;
-const BOS_SIZE: u8    =      5;
-const DEVICE_CAPABILITY_SIZE : u8 =  3;
-const INTERFACE_ASSOCIATION_SIZE : u8 =  8;
+const DEVICE_SIZE: u8 = 18;
+const CONFIG_SIZE: u8 = 9;
+const INTERFACE_SIZE: u8 = 9;
+const ENDPOINT_SIZE: u8 = 7;
+const ENDPOINT_AUDIO_SIZE: u8 = 9;
+const HUB_NONVAR_SIZE: u8 = 7;
+const SS_ENDPOINT_COMPANION_SIZE: u8 = 6;
+const BOS_SIZE: u8 = 5;
+const DEVICE_CAPABILITY_SIZE: u8 = 3;
+const INTERFACE_ASSOCIATION_SIZE: u8 = 8;
 
 /* BOS descriptor sizes */
-const BT_USB_2_0_EXTENSION_SIZE: u8 =   7;
-const BT_SS_USB_DEVICE_CAPABILITY_SIZE : u8 =10;
-const BT_SSPLUS_USB_DEVICE_CAPABILITY_SIZE: u8 =12;
-const BT_CONTAINER_ID_SIZE : u8   = 20;
-const BT_PLATFORM_DESCRIPTOR_MIN_SIZE : u8  =   20;
+const BT_USB_2_0_EXTENSION_SIZE: u8 = 7;
+const BT_SS_USB_DEVICE_CAPABILITY_SIZE: u8 = 10;
+const BT_SSPLUS_USB_DEVICE_CAPABILITY_SIZE: u8 = 12;
+const BT_CONTAINER_ID_SIZE: u8 = 20;
+const BT_PLATFORM_DESCRIPTOR_MIN_SIZE: u8 = 20;
 
-const ENDPOINT_ADDRESS_MASK: u8 =        0x0f ;
-const ENDPOINT_DIR_MASK : u8 =       0x80;
+const ENDPOINT_ADDRESS_MASK: u8 = 0x0f;
+const ENDPOINT_DIR_MASK: u8 = 0x80;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum USBSpeed {
@@ -172,7 +176,7 @@ const USB_SUBCLASS_DFU: u8 = 0x01;
 const APPLE_SUBCLASS_USBMUX: u8 = 0xFE;
 const APPLE_PROTOCOL_USBMUX2: u8 = 0x02;
 
-const TRANSFER_TYPE_MASK :u8 =      0x03;
+const TRANSFER_TYPE_MASK: u8 = 0x03;
 
 enum URBRecordType {
     OutTransaction,
@@ -193,7 +197,7 @@ enum AppleUSBDeviceID {
     RecoveryMode4 = 0x1283,
     WheresTheFirmwareMode = 0x1222,
     DeviceFirmwareUpdateMode = 0x1227,
-    DebugUsb = 0x1881
+    DebugUsb = 0x1881,
 }
 
 bitflags! {
@@ -215,12 +219,12 @@ bitflags! {
 }
 
 pub struct USBSetAddress {
-    device_id: u8
+    device_id: u8,
 }
 
 pub struct USBGetDeviceDescriptor {
     device_id: u8,
-    index: u8
+    index: u8,
 }
 
 #[derive(Debug)]
@@ -257,7 +261,7 @@ pub struct USBDevice {
 }
 
 pub struct USBConfiguration {
-    interfaces: Map<u8, USBInterface>
+    interfaces: Map<u8, USBInterface>,
 }
 
 pub struct USBInterface {
@@ -269,9 +273,10 @@ pub struct USBInterface {
 pub struct USBEndpoint {
     endpoint_id: u8,
     direction: USBDirection,
-    urbs: Vec<USBRequestBlock>
+    urbs: Vec<USBRequestBlock>,
 }
 
+#[derive(Debug)]
 struct USBDeviceDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
@@ -289,6 +294,7 @@ struct USBDeviceDescriptor {
     configuration_count: u8,
 }
 
+#[derive(Debug)]
 struct EndpointDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
@@ -302,6 +308,7 @@ struct EndpointDescriptor {
     extra_length: u32,
 }
 
+#[derive(Debug)]
 struct InterfaceAssociationDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
@@ -318,6 +325,7 @@ struct InterfaceAssociationDescriptorArray {
     length: u32,
 }
 
+#[derive(Debug)]
 struct InterfaceDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
@@ -333,11 +341,13 @@ struct InterfaceDescriptor {
     extra_length: u32,
 }
 
+#[derive(Debug)]
 struct USBInterfaceDescriptor {
     altsetting: InterfaceDescriptor,
     alternate_setting_count: u32,
 }
 
+#[derive(Debug)]
 struct USBConfigDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
@@ -347,7 +357,7 @@ struct USBConfigDescriptor {
     configuration_index: u8,
     attributes: USBAttributes,
     max_power: u8,
-     interface: USBInterfaceDescriptor,
+    interface: USBInterfaceDescriptor,
     extra: *const u8,
     extra_length: u32,
 }
@@ -360,6 +370,7 @@ struct SsEndpointCompanionDescriptor {
     bytes_per_interval: u16,
 }
 
+#[derive(Debug)]
 struct BosDevCapabilityDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
@@ -367,6 +378,7 @@ struct BosDevCapabilityDescriptor {
     dev_capability_data: *const u8,
 }
 
+#[derive(Debug)]
 struct BinaryObjectStoreDescriptor {
     length: u8,
     descriptor_type: USBDescriptorType,
@@ -415,7 +427,7 @@ enum SuperspeedplusSublinkAttributeLinkProtocol {
     LibusbSsplusAttrProtSsplus = 1,
 }
 
-enum LibusbSuperspeedplusSublinkAttributeExponent { LibusbSsplusAttrExpBps = 0 , LibusbSsplusAttrExpKbs = 1 , LibusbSsplusAttrExpMbs = 2 , LibusbSsplusAttrExpGbs = 3 }
+enum LibusbSuperspeedplusSublinkAttributeExponent { LibusbSsplusAttrExpBps = 0, LibusbSsplusAttrExpKbs = 1, LibusbSsplusAttrExpMbs = 2, LibusbSsplusAttrExpGbs = 3 }
 
 enum LibusbSuperspeedplusSublinkAttributeSublinkType {
     LibusbSsplusAttrTypeSym = 0,
@@ -436,7 +448,7 @@ struct SsplusUsbDeviceCapabilityDescriptor {
     ssid: u8,
     min_rx_lane_count: u8,
     min_tx_lane_count: u8,
-    sublink_speed_attributes:  [LibusbSsplusSublinkAttribute],
+    sublink_speed_attributes: [LibusbSsplusSublinkAttribute],
 }
 
 struct ContainerIdDescriptor {
@@ -444,7 +456,7 @@ struct ContainerIdDescriptor {
     descriptor_type: USBDescriptorType,
     compatability_type: USBBinaryObjectStoreType,
     reserved: u8,
-    container_id : [u8; 16],
+    container_id: [u8; 16],
 }
 
 struct USBPlatformDescriptor {

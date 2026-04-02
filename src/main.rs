@@ -3,10 +3,10 @@ mod usb_request_block;
 mod total_phase_parser;
 mod pcap_writer;
 
+use crate::pcap_writer::USBPcapWriter;
 use clap::{arg, Command};
 use std::fs::File;
 use std::io::BufWriter;
-use crate::pcap_writer::USBPcapWriter;
 
 fn cli() -> Command {
     Command::new("demuxusb-rs")
@@ -48,7 +48,6 @@ fn main() -> Result<()> {
             for p in packets.unwrap() {
                 println!("{:?}", p.dict_data());
             }
-
         }
 
         Some(("pcap", sub_matches)) => {
@@ -63,8 +62,7 @@ fn main() -> Result<()> {
             let mut pcap_writer = USBPcapWriter::new(writer)?;
 
 
-        pcap_writer.write_urbs(&packets.unwrap());
-
+            pcap_writer.write_urbs(&packets.unwrap()).expect("Conversion failed");
         }
 
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachable!()

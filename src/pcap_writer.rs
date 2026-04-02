@@ -1,16 +1,15 @@
-use std::borrow::Cow;
-use std::fs::File;
-use std::io::{Write, Result, BufWriter};
-use std::mem;
-use std::time::Duration;
-use crate::usb_request_block::{USBRequestBlock, USBDirection, USBTransferType, USBControlStage};
-use pcap_file::pcapng::PcapNgWriter;
-use pcap_file::{DataLink, PcapError};
+use crate::usb_request_block::{USBControlStage, USBDirection, USBRequestBlock, USBTransferType};
 use pcap_file::pcapng::blocks::enhanced_packet::EnhancedPacketBlock;
 use pcap_file::pcapng::blocks::interface_description::InterfaceDescriptionBlock;
+use pcap_file::pcapng::PcapNgWriter;
+use pcap_file::DataLink;
+use std::borrow::Cow;
+use std::fs::File;
+use std::io::{BufWriter, Result};
+use std::mem;
+use std::time::Duration;
 use zerocopy::IntoBytes;
 use zerocopy_derive::{Immutable, IntoBytes};
-use demuxusb_rs::usb_request_block::USBDirection::DirectionIn;
 
 pub struct USBPcapWriter {
     writer: PcapNgWriter<BufWriter<File>>,
@@ -33,7 +32,6 @@ struct USBPcapPacketHeader {
 
 impl USBPcapWriter {
     pub fn new(file: BufWriter<File>) -> Result<Self> {
-
         let mut writer = PcapNgWriter::new(file).unwrap();
 
         let interface = InterfaceDescriptionBlock {
@@ -49,7 +47,7 @@ impl USBPcapWriter {
         )
     }
 
-    pub fn write_urbs(&mut self, urbs: &Vec< USBRequestBlock>) -> Result<()> {
+    pub fn write_urbs(&mut self, urbs: &Vec<USBRequestBlock>) -> Result<()> {
         let mut control_xfer: Option<u64> = None;
         let mut control_cat = Vec::<u8>::new();
         for urb in urbs {
@@ -96,8 +94,7 @@ impl USBPcapWriter {
 
             let info: u8 = if urb.direction == USBDirection::DirectionIn {
                 1
-            }
-            else { 0 };
+            } else { 0 };
 
             let mut use_data = if control == Some(3) {
                 control_cat.clone()

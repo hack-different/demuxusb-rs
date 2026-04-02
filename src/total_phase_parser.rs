@@ -1,13 +1,12 @@
-use std::cmp::PartialEq;
+use crate::usb_request_block::{USBControlStage, USBDirection, USBFunction, USBRequestBlock, USBSpeed, USBTransferType};
 use anyhow::{Context, Result};
 use csv::StringRecord;
+use std::cmp::PartialEq;
 use std::collections::HashMap;
-use std::fmt;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use strum_macros::Display;
-use crate::usb_request_block::{USBControlStage, USBDirection, USBFunction, USBRequestBlock, USBSpeed, USBTransferType};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CaptureState {
@@ -69,13 +68,11 @@ pub enum OperationType {
     Reset(ResetType),
     CaptureState(CaptureState),
     StallPacket,
-    Unknown
+    Unknown,
 }
 
 #[derive(Debug)]
-pub enum PacketError {
-
-}
+pub enum PacketError {}
 
 #[derive(Debug)]
 pub enum DataRecord {
@@ -88,7 +85,7 @@ pub struct TotalPhaseReader {
     csv_path: String,
     bin_path: String,
     binary_reader: BufReader<File>,
-    csv_reader: csv::Reader<BufReader<File>>
+    csv_reader: csv::Reader<BufReader<File>>,
 }
 
 type DeviceId = u8;
@@ -116,11 +113,11 @@ pub struct USBPacket<'a> {
 }
 
 
-impl <'a> USBPacket<'a> {
+impl<'a> USBPacket<'a> {
     pub fn new(
         record: StringRecord,
         current_offset: u64,
-        binary_reader: &mut BufReader<File>
+        binary_reader: &mut BufReader<File>,
     ) -> Self {
         // First column is the level, this indicates if the record is nested below the prior record
         let level: u8 = record[0].parse().unwrap();
@@ -157,7 +154,7 @@ impl <'a> USBPacket<'a> {
         };
 
         // TODO: Error parsing
-        let error: Option<PacketError> =  None;
+        let error: Option<PacketError> = None;
 
         let device_id: Option<DeviceId> = record[7].parse().ok();
         let endpoint_id: Option<EndpointId> = record[8].parse().ok();
@@ -201,7 +198,7 @@ impl <'a> USBPacket<'a> {
             Some(_) => Some(current_offset),
         };
 
-        let children : Vec<&USBPacket> = Vec::new();
+        let children: Vec<&USBPacket> = Vec::new();
 
         let data = if length.is_some() {
             binary_reader.seek(SeekFrom::Start(current_offset)).unwrap();
@@ -229,7 +226,7 @@ impl <'a> USBPacket<'a> {
             children,
             stall,
             operation,
-            data
+            data,
         }
     }
 
@@ -345,7 +342,7 @@ impl TotalPhaseReader {
             bin_path,
             csv_reader,
             csv_path,
-            binary_reader
+            binary_reader,
         })
     }
 
@@ -375,7 +372,7 @@ impl TotalPhaseReader {
 
     pub fn usb_request_blocks(&mut self) -> Result<Vec<USBRequestBlock>, Box<dyn Error>> {
         let mut results: Vec<USBRequestBlock> = Vec::new();
-        let packets = self.read().unwrap();
+        let packets = self.read()?;
         for result in packets {
             let item = match result.operation {
                 OperationType::OutputPacket => {
@@ -392,7 +389,7 @@ impl TotalPhaseReader {
                         duration_ns: result.duration_us.unwrap_or(0),
                         usb_function: total_phase_to_usb_function(result.operation),
                     })
-                },
+                }
                 OperationType::SetupTransaction => {
                     Some(USBRequestBlock {
                         direction: USBDirection::DirectionOut,
@@ -407,7 +404,7 @@ impl TotalPhaseReader {
                         duration_ns: result.duration_us.unwrap_or(0),
                         usb_function: total_phase_to_usb_function(result.operation),
                     })
-                },
+                }
                 OperationType::InputTransaction => {
                     if result.level == 0 {
                         Some(USBRequestBlock {
@@ -424,21 +421,21 @@ impl TotalPhaseReader {
                             usb_function: total_phase_to_usb_function(result.operation),
                         })
                     } else {
-                    Some(USBRequestBlock {
-                        direction: USBDirection::DirectionIn,
-                        data: result.data.unwrap(),
-                        speed: result.speed,
-                        device_number: result.device_id.unwrap(),
-                        endpoint_number: result.endpoint_id.unwrap(),
-                        index: result.index as u32,
-                        transfer_type: USBTransferType::Control,
-                        control_stage: Some(USBControlStage::Data),
-                        index_ns: result.timestamp,
-                        duration_ns: result.duration_us.unwrap_or(0),
-                        usb_function: total_phase_to_usb_function(result.operation),
-                    })
-                        }
-                },
+                        Some(USBRequestBlock {
+                            direction: USBDirection::DirectionIn,
+                            data: result.data.unwrap(),
+                            speed: result.speed,
+                            device_number: result.device_id.unwrap(),
+                            endpoint_number: result.endpoint_id.unwrap(),
+                            index: result.index as u32,
+                            transfer_type: USBTransferType::Control,
+                            control_stage: Some(USBControlStage::Data),
+                            index_ns: result.timestamp,
+                            duration_ns: result.duration_us.unwrap_or(0),
+                            usb_function: total_phase_to_usb_function(result.operation),
+                        })
+                    }
+                }
                 OperationType::OutputTransaction => {
                     if result.level == 0 {
                         Some(USBRequestBlock {
@@ -454,8 +451,7 @@ impl TotalPhaseReader {
                             duration_ns: result.duration_us.unwrap_or(0),
                             usb_function: total_phase_to_usb_function(result.operation),
                         })
-                    }
-                    else {
+                    } else {
                         Some(USBRequestBlock {
                             direction: USBDirection::DirectionIn,
                             data: result.data.unwrap(),
@@ -470,7 +466,7 @@ impl TotalPhaseReader {
                             usb_function: total_phase_to_usb_function(result.operation),
                         })
                     }
-                },
+                }
                 _ => None
             };
             if item.is_some() {
@@ -501,9 +497,8 @@ fn time_from_totalphase_timestamp(ts: &str) -> u64 {
 fn duration_from_totalphase_duration(ts: Option<&str>) -> Option<u64> {
     if let Some(ts) = ts {
         if ts == "" {
-            return None
-        }
-        else if ts.ends_with(" s") {
+            return None;
+        } else if ts.ends_with(" s") {
             let parts: Vec<&str> = ts.strip_suffix(" s").expect("Tested for suffix").split('.').collect();
             let s_part: u32 = parts[0].parse().unwrap();
             let ms_part: u32 = parts[1].parse().unwrap();
@@ -511,16 +506,14 @@ fn duration_from_totalphase_duration(ts: Option<&str>) -> Option<u64> {
             let us_part: u32 = parts[3].parse().unwrap();
             let total: u64 = ((s_part * 1000 * 1000 * 1000) + us_part + (1000 + ns_part) + (1000 + ms_part * 1000)) as u64;
             return Some(total);
-        }
-        else if ts.ends_with(" ms") {
+        } else if ts.ends_with(" ms") {
             let parts: Vec<&str> = ts.strip_suffix(" ms").expect("Tested for suffix").split('.').collect();
             let ms_part: u32 = parts[0].parse().unwrap();
             let ns_part: u32 = parts[1].parse().unwrap();
             let us_part: u32 = parts[2].parse().unwrap();
             let total: u64 = (us_part + (1000 + ns_part) + (1000 + ms_part * 1000)) as u64;
             return Some(total);
-        }
-        else if ts.ends_with(" us") {
+        } else if ts.ends_with(" us") {
             let parts: Vec<&str> = ts.strip_suffix(" us").expect("Tested for suffix").split('.').collect();
             let us_part: u32 = parts[0].parse().unwrap();
             let ns_part: u32 = parts[1].parse().unwrap();
