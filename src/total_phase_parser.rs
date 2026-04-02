@@ -209,7 +209,7 @@ impl <'a> USBPacket<'a> {
             binary_reader.read_exact(data.as_mut_slice()).expect("Should read exact data");
             Some(data)
         } else {
-            None
+            Some(Vec::new())
         };
 
         USBPacket {
@@ -311,10 +311,16 @@ pub fn total_phase_to_usb_function(op: OperationType) -> USBFunction {
             USBFunction::BulkOrInterruptTransfer
         }
         OperationType::ControlTransfer => {
-            USBFunction::ControlTransfer
+            USBFunction::ControlTransferEx
         }
         OperationType::GetConfigurationDescriptor => {
             USBFunction::GetConfiguration
+        }
+        OperationType::Data0Packet => {
+            USBFunction::ControlTransfer
+        }
+        OperationType::Data1Packet => {
+            USBFunction::ControlTransfer
         }
         _ => USBFunction::Unknown,
     }
@@ -372,21 +378,6 @@ impl TotalPhaseReader {
         let packets = self.read().unwrap();
         for result in packets {
             let item = match result.operation {
-                OperationType::InputPacket => {
-                    Some(USBRequestBlock {
-                        direction: USBDirection::DirectionIn,
-                        data: result.data.unwrap(),
-                        speed: result.speed,
-                        device_number: result.device_id.unwrap(),
-                        endpoint_number: result.endpoint_id.unwrap(),
-                        index: result.index as u32,
-                        transfer_type: USBTransferType::Bulk,
-                        control_stage: None,
-                        index_ns: result.timestamp,
-                        duration_ns: result.duration_us.unwrap_or(0),
-                        usb_function: total_phase_to_usb_function(result.operation),
-                    })
-                },
                 OperationType::OutputPacket => {
                     Some(USBRequestBlock {
                         direction: USBDirection::DirectionOut,
@@ -417,9 +408,24 @@ impl TotalPhaseReader {
                         usb_function: total_phase_to_usb_function(result.operation),
                     })
                 },
-                OperationType::Data0Packet => {
+                OperationType::InputTransaction => {
+                    if result.level == 0 {
+                        Some(USBRequestBlock {
+                            direction: USBDirection::DirectionIn,
+                            data: result.data.unwrap(),
+                            speed: result.speed,
+                            device_number: result.device_id.unwrap(),
+                            endpoint_number: result.endpoint_id.unwrap(),
+                            index: result.index as u32,
+                            transfer_type: USBTransferType::Bulk,
+                            control_stage: None,
+                            index_ns: result.timestamp,
+                            duration_ns: result.duration_us.unwrap_or(0),
+                            usb_function: total_phase_to_usb_function(result.operation),
+                        })
+                    } else {
                     Some(USBRequestBlock {
-                        direction: USBDirection::DirectionOut,
+                        direction: USBDirection::DirectionIn,
                         data: result.data.unwrap(),
                         speed: result.speed,
                         device_number: result.device_id.unwrap(),
@@ -431,22 +437,40 @@ impl TotalPhaseReader {
                         duration_ns: result.duration_us.unwrap_or(0),
                         usb_function: total_phase_to_usb_function(result.operation),
                     })
+                        }
                 },
-                OperationType::AcknowledgePacket => {
-                    Some(USBRequestBlock {
-                        direction: USBDirection::DirectionOut,
-                        data: result.data.unwrap(),
-                        speed: result.speed,
-                        device_number: result.device_id.unwrap(),
-                        endpoint_number: result.endpoint_id.unwrap(),
-                        index: result.index as u32,
-                        transfer_type: USBTransferType::Control,
-                        control_stage: Some(USBControlStage::Complete),
-                        index_ns: result.timestamp,
-                        duration_ns: result.duration_us.unwrap_or(0),
-                        usb_function: total_phase_to_usb_function(result.operation),
-                    })
-                }
+                OperationType::OutputTransaction => {
+                    if result.level == 0 {
+                        Some(USBRequestBlock {
+                            direction: USBDirection::DirectionOut,
+                            data: result.data.unwrap(),
+                            speed: result.speed,
+                            device_number: result.device_id.unwrap(),
+                            endpoint_number: result.endpoint_id.unwrap(),
+                            index: result.index as u32,
+                            transfer_type: USBTransferType::Bulk,
+                            control_stage: None,
+                            index_ns: result.timestamp,
+                            duration_ns: result.duration_us.unwrap_or(0),
+                            usb_function: total_phase_to_usb_function(result.operation),
+                        })
+                    }
+                    else {
+                        Some(USBRequestBlock {
+                            direction: USBDirection::DirectionOut,
+                            data: result.data.unwrap(),
+                            speed: result.speed,
+                            device_number: result.device_id.unwrap(),
+                            endpoint_number: result.endpoint_id.unwrap(),
+                            index: result.index as u32,
+                            transfer_type: USBTransferType::Control,
+                            control_stage: Some(USBControlStage::Data),
+                            index_ns: result.timestamp,
+                            duration_ns: result.duration_us.unwrap_or(0),
+                            usb_function: total_phase_to_usb_function(result.operation),
+                        })
+                    }
+                },
                 _ => None
             };
             if item.is_some() {

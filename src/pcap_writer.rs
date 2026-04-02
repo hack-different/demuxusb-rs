@@ -10,6 +10,7 @@ use pcap_file::pcapng::blocks::enhanced_packet::EnhancedPacketBlock;
 use pcap_file::pcapng::blocks::interface_description::InterfaceDescriptionBlock;
 use zerocopy::IntoBytes;
 use zerocopy_derive::{Immutable, IntoBytes};
+use demuxusb_rs::usb_request_block::USBDirection::DirectionIn;
 
 pub struct USBPcapWriter {
     writer: PcapNgWriter<BufWriter<File>>,
@@ -49,6 +50,7 @@ impl USBPcapWriter {
     }
 
     pub fn write_urbs(&mut self, urbs: &Vec< USBRequestBlock>) -> Result<()> {
+        let mut control_xfer: Option<u64> = None;
         for urb in urbs {
             let size = mem::size_of::<USBPcapPacketHeader>();
 
@@ -60,21 +62,11 @@ impl USBPcapWriter {
             };
             let function_id = urb.usb_function.clone() as u16;
 
-            let header = USBPcapPacketHeader {
-                header_length: size as u16,
-                data_length: urb.data.len() as u32,
-                transfer: transfer_type,
-                io_packet_id: urb.index as u64,
-                bus: 0,
-                device: urb.device_number as u16,
-                endpoint: urb.endpoint_number,
-                usb_status: 0,
-                info: 0,
-                urb_function: function_id,
-            };
-
-            let mut packet_bytes = header.as_bytes().to_vec();
-            if header.transfer == 2 {
+            let mut endpoint = urb.endpoint_number.clone() as u8;
+            if urb.direction == USBDirection::DirectionIn {
+                endpoint = endpoint + 0x80;
+            }
+            let control = if transfer_type == 2 {
                 let control_type = match urb.control_stage {
                     None => { None }
                     Some(USBControlStage::Data) => { Some(1) }
@@ -82,9 +74,42 @@ impl USBPcapWriter {
                     Some(USBControlStage::Status) => { Some(2) }
                     Some(USBControlStage::Complete) => { Some(3) }
                 };
-                let mut additional = vec![control_type.unwrap() as u8];
+
+                if control_type == Some(0) {
+                    control_xfer = Some(urb.index as u64);
+                }
+                control_type
+            } else {
+                control_xfer = None;
+                None
+            };
+
+            let index = control_xfer.unwrap_or(urb.index as u64);
+
+            let info: u8 = if urb.direction == USBDirection::DirectionIn {
+                1
+            }
+            else { 0 };
+
+            let header = USBPcapPacketHeader {
+                header_length: size as u16,
+                data_length: urb.data.len() as u32,
+                transfer: transfer_type,
+                io_packet_id: index,
+                bus: 0,
+                device: urb.device_number as u16,
+                endpoint,
+                usb_status: 0,
+                info: info,
+                urb_function: function_id,
+            };
+
+            let mut packet_bytes = header.as_bytes().to_vec();
+            if control.is_some() {
+                let mut additional = vec![control.unwrap() as u8];
                 packet_bytes.append(&mut additional);
             }
+
             packet_bytes.append(&mut urb.data.clone());
 
             let packet = EnhancedPacketBlock {
