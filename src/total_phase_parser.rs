@@ -457,14 +457,14 @@ impl TotalPhaseReader {
                     }
                     else {
                         Some(USBRequestBlock {
-                            direction: USBDirection::DirectionOut,
+                            direction: USBDirection::DirectionIn,
                             data: result.data.unwrap(),
                             speed: result.speed,
                             device_number: result.device_id.unwrap(),
                             endpoint_number: result.endpoint_id.unwrap(),
                             index: result.index as u32,
                             transfer_type: USBTransferType::Control,
-                            control_stage: Some(USBControlStage::Data),
+                            control_stage: Some(USBControlStage::Complete),
                             index_ns: result.timestamp,
                             duration_ns: result.duration_us.unwrap_or(0),
                             usb_function: total_phase_to_usb_function(result.operation),

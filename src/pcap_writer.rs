@@ -51,6 +51,7 @@ impl USBPcapWriter {
 
     pub fn write_urbs(&mut self, urbs: &Vec< USBRequestBlock>) -> Result<()> {
         let mut control_xfer: Option<u64> = None;
+        let mut control_cat = Vec::<u8>::new();
         for urb in urbs {
             let size = mem::size_of::<USBPcapPacketHeader>();
 
@@ -77,12 +78,19 @@ impl USBPcapWriter {
 
                 if control_type == Some(0) {
                     control_xfer = Some(urb.index as u64);
+                    control_cat = Vec::<u8>::new();
                 }
                 control_type
             } else {
                 control_xfer = None;
+                control_cat = Vec::<u8>::new();
                 None
             };
+
+            if control == Some(1) {
+                control_cat.append(&mut urb.data.clone());
+                continue;
+            }
 
             let index = control_xfer.unwrap_or(urb.index as u64);
 
@@ -91,16 +99,22 @@ impl USBPcapWriter {
             }
             else { 0 };
 
+            let mut use_data = if control == Some(3) {
+                control_cat.clone()
+            } else {
+                urb.data.clone()
+            };
+
             let header = USBPcapPacketHeader {
                 header_length: size as u16,
-                data_length: urb.data.len() as u32,
+                data_length: use_data.len() as u32,
                 transfer: transfer_type,
                 io_packet_id: index,
                 bus: 0,
                 device: urb.device_number as u16,
                 endpoint,
                 usb_status: 0,
-                info: info,
+                info,
                 urb_function: function_id,
             };
 
@@ -110,7 +124,7 @@ impl USBPcapWriter {
                 packet_bytes.append(&mut additional);
             }
 
-            packet_bytes.append(&mut urb.data.clone());
+            packet_bytes.append(&mut use_data);
 
             let packet = EnhancedPacketBlock {
                 interface_id: 0,
