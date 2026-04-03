@@ -65,48 +65,22 @@ impl USBPcapWriter {
             if urb.direction == USBDirection::DirectionIn {
                 endpoint = endpoint + 0x80;
             }
-            let control = if transfer_type == 2 {
-                let control_type = match urb.control_stage {
-                    None => { None }
-                    Some(USBControlStage::Data) => { Some(1) }
-                    Some(USBControlStage::Setup) => { Some(0) }
-                    Some(USBControlStage::Status) => { Some(2) }
-                    Some(USBControlStage::Complete) => { Some(3) }
-                };
 
-                if control_type == Some(0) {
-                    control_xfer = Some(urb.index as u64);
-                    control_cat = Vec::<u8>::new();
-                }
-                control_type
-            } else {
-                control_xfer = None;
-                control_cat = Vec::<u8>::new();
-                None
+            let control_type = match urb.control_stage {
+                None => { None }
+                Some(USBControlStage::Data) => { Some(1) }
+                Some(USBControlStage::Setup) => { Some(0) }
+                Some(USBControlStage::Status) => { Some(2) }
+                Some(USBControlStage::Complete) => { Some(3) }
             };
 
-            if control == Some(1) {
-                control_cat.append(&mut urb.data.clone());
-                continue;
-            }
-
-            let index = control_xfer.unwrap_or(urb.index as u64);
-
-            let info: u8 = if urb.direction == USBDirection::DirectionIn {
-                1
-            } else { 0 };
-
-            let mut use_data = if control == Some(3) {
-                control_cat.clone()
-            } else {
-                urb.data.clone()
-            };
+            let info: u8 = if urb.direction == USBDirection::DirectionIn { 1 } else { 0 };
 
             let header = USBPcapPacketHeader {
                 header_length: size as u16,
-                data_length: use_data.len() as u32,
+                data_length: urb.data.len() as u32,
                 transfer: transfer_type,
-                io_packet_id: index,
+                io_packet_id: urb.index as u64,
                 bus: 0,
                 device: urb.device_number as u16,
                 endpoint,
@@ -116,12 +90,12 @@ impl USBPcapWriter {
             };
 
             let mut packet_bytes = header.as_bytes().to_vec();
-            if control.is_some() {
-                let mut additional = vec![control.unwrap() as u8];
+            if control_type.is_some() {
+                let mut additional = vec![control_type.unwrap() as u8];
                 packet_bytes.append(&mut additional);
             }
 
-            packet_bytes.append(&mut use_data);
+            packet_bytes.append(&mut urb.data.clone());
 
             let packet = EnhancedPacketBlock {
                 interface_id: 0,

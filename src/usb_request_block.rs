@@ -157,7 +157,7 @@ const BT_PLATFORM_DESCRIPTOR_MIN_SIZE: u8 = 20;
 const ENDPOINT_ADDRESS_MASK: u8 = 0x0f;
 const ENDPOINT_DIR_MASK: u8 = 0x80;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum USBSpeed {
     SpeedUnknown,
     SpeedLow,

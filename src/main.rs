@@ -7,6 +7,18 @@ use crate::pcap_writer::USBPcapWriter;
 use clap::{arg, Command};
 use std::fs::File;
 use std::io::BufWriter;
+use indextree::Arena;
+
+fn print_tree<T: std::fmt::Debug>(node_id: indextree::NodeId, arena: &Arena<T>, indent: &str) {
+    let node = &arena[node_id];
+    println!("{}+- {:?}", indent, node.get());
+
+    let new_indent = format!("{}  ", indent);
+    let mut children = node_id.children(arena);
+    while let Some(child) = children.next() {
+        print_tree(child, arena, &new_indent);
+    }
+}
 
 fn cli() -> Command {
     Command::new("demuxusb-rs")
@@ -44,9 +56,13 @@ fn main() -> Result<()> {
             }
 
             let mut reader = total_phase_parser::totalphase_reader(&filebase).unwrap();
-            let packets = reader.read();
-            for p in packets.unwrap() {
-                println!("{:?}", p.dict_data());
+            let packets = reader.read_tree(true).unwrap();
+            let root_nodes: Vec<_> = packets
+                .iter()
+                .filter(|node| node.parent().is_none())
+                .collect();
+            for root in root_nodes {
+                print_tree(packets.get_node_id(root).unwrap(), &packets, "");
             }
         }
 

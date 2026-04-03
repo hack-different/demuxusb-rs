@@ -3,32 +3,35 @@ use anyhow::{Context, Result};
 use csv::StringRecord;
 use std::cmp::PartialEq;
 use std::collections::HashMap;
+use indextree::{Arena, Node, NodeId};
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use derivative::Derivative;
 use strum_macros::Display;
+use crate::usb_request_block::USBDirection::{DirectionIn, DirectionOut};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Display)]
 pub enum CaptureState {
     Stopped,
     Suspended,
     Started,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum TriggerType {
     Manual,
     ManualOrUSB2,
     ManualOrUSB3,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum VBusState {
     Present,
     Absent,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum ResetType {
     KeepAliveTargetDisconnected,
     KeepaliveChirpKTinyK,
@@ -39,13 +42,13 @@ pub enum ResetType {
     Default
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum ConnectionState {
     Connected,
     Disconnected,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum USB3Signal {
     ChipK,
     TinyK,
@@ -54,29 +57,23 @@ pub enum USB3Signal {
     ChirpJ,
 }
 
-#[derive(Debug, PartialEq, Eq, Display)]
+#[derive(Debug, PartialEq, Eq, Display, Clone, Copy)]
 pub enum OperationType {
-    LinkTrainingStatusStateMachine,
     GetStringDescriptor,
-    LFPSUnknown,
     NotYetPacket,
     InPacket,
     CorruptedPacket,
     PingAcknowledge,
     PingPacket,
     NegativeAcknowledge,
-    StartOfFramePacket,
     SetIdle,
     InputPacket,
     SetInterface,
-    TargetState(ConnectionState),
-    Trigger(TriggerType),
     GetHubDescriptor,
     SetupTransaction,
     SetPortFeature,
     OutputTransaction,
     AcknowledgePacket,
-LFPSPolling,
     Data1Packet,
     SetOutputReport,
     GetHubStatus,
@@ -98,7 +95,13 @@ LFPSPolling,
     OutputPacket,
     GetConfigurationDescriptor,
     SetupPacket,
+
+    StartOfFramePacket,
     Comment,
+    TargetState(ConnectionState),
+    Trigger(TriggerType),
+    LFPSUnknown,
+    LFPSPolling,
     USB3Signal(USB3Signal),
     HostState(ConnectionState),
     SpeedTransition(USBSpeed),
@@ -106,6 +109,7 @@ LFPSPolling,
     VBus(VBusState),
     CaptureState(CaptureState),
     StallPacket,
+    LinkTrainingStatusStateMachine,
     Unknown,
 }
 
@@ -129,24 +133,32 @@ pub struct TotalPhaseReader {
 type DeviceId = u8;
 type EndpointId = u8;
 
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct USBPacket<'a> {
     pub level: u8,
-    pub speed: USBSpeed,
+
     pub index: u64,
-    pub timestamp: u64,
-    pub duration_us: Option<u64>,
-    pub length: Option<u64>,
-    pub error: Option<PacketError>,
     pub device_id: Option<DeviceId>,
     pub endpoint_id: Option<EndpointId>,
     pub operation: OperationType,
+    pub length: Option<u64>,
+    pub timestamp: u64,
+    pub duration_us: Option<u64>,
+
+    pub error: Option<PacketError>,
+
+
     pub extra: Option<String>,
+    #[derivative(Debug="ignore")]
     pub short_data: DataRecord,
+    #[derivative(Debug="ignore")]
     pub data: Option<Vec<u8>>,
     pub summary: String,
     pub stall: bool,
+    pub speed: USBSpeed,
     pub data_offset: Option<u64>,
+    #[derivative(Debug="ignore")]
     pub children: Vec<&'a USBPacket<'a>>,
 }
 
@@ -276,6 +288,48 @@ impl<'a> USBPacket<'a> {
         self.children.push(child);
     }
 
+    pub fn is_interesting(&self) -> bool {
+        let interesting = vec![    OperationType::GetStringDescriptor,
+                                   OperationType::NotYetPacket,
+                                   OperationType::InPacket,
+                                   OperationType::CorruptedPacket,
+                                   OperationType::PingAcknowledge,
+                                   OperationType::PingPacket,
+                                   OperationType::NegativeAcknowledge,
+                                   OperationType::SetIdle,
+                                   OperationType::InputPacket,
+                                   OperationType::SetInterface,
+                                   OperationType::GetHubDescriptor,
+                                   OperationType::SetupTransaction,
+                                   OperationType::SetPortFeature,
+                                   OperationType::OutputTransaction,
+                                   OperationType::AcknowledgePacket,
+                                   OperationType::Data1Packet,
+                                   OperationType::SetOutputReport,
+                                   OperationType::GetHubStatus,
+                                   OperationType::OutputDataNegativeAcknowledge,
+                                   OperationType::InputReport,
+                                   OperationType::ClearPortFeature,
+                                   OperationType::HubStatus,
+                                   OperationType::SetAddress,
+                                   OperationType::InputNegativeAcknowledge,
+                                   OperationType::GetPortStatus,
+                                   OperationType::GetDeviceDescriptor,
+                                   OperationType::GetDeviceStatus,
+                                   OperationType::GetReportDescriptor,
+                                   OperationType::InputTransaction,
+                                   OperationType::ControlTransfer,
+                                   OperationType::GetDeviceQualifierDescriptor,
+                                   OperationType::SetConfiguration,
+                                   OperationType::Data0Packet,
+                                   OperationType::OutputPacket,
+                                   OperationType::GetConfigurationDescriptor,
+                                   OperationType::SetupPacket];
+        if interesting.contains(&self.operation) {
+            return true;
+        }
+        return false;
+    }
 
     pub fn dict_data(&self) -> HashMap<&str, String> {
         let mut m = HashMap::new();
@@ -392,6 +446,18 @@ pub fn total_phase_to_usb_function(op: OperationType) -> USBFunction {
         OperationType::Data1Packet => {
             USBFunction::ControlTransfer
         }
+        OperationType::OutputTransaction => {
+            USBFunction::BulkOrInterruptTransfer
+        }
+        OperationType::InPacket => {
+            USBFunction::BulkOrInterruptTransfer
+        }
+        OperationType::InputPacket => {
+            USBFunction::BulkOrInterruptTransfer
+        }
+        OperationType::InputReport => {
+            USBFunction::BulkOrInterruptTransfer
+        }
         _ => USBFunction::Unknown,
     }
 }
@@ -434,6 +500,33 @@ impl TotalPhaseReader {
         Ok(packets)
     }
 
+    pub fn read_tree(&mut self, interesting_only: bool) -> Result<Arena<USBPacket>, Box<dyn Error>> {
+        let mut packets = self.read()?;
+        if interesting_only {
+            packets.retain(|packet| packet.is_interesting());
+        }
+
+
+        let mut tree: Arena<USBPacket> = Arena::new();
+        let mut parents: Vec<NodeId> = Vec::new();
+
+        for packet in packets {
+            if packet.level == 0 {
+                let node_id = tree.new_node(packet);
+                parents = vec![node_id];
+            } else {
+                parents.truncate((packet.level) as usize);
+
+                let parent = parents.last().unwrap();
+
+                let new_id = tree.new_node(packet);
+                parent.append(new_id, &mut tree);
+                parents.push(new_id);
+            }
+        }
+        Ok(tree)
+    }
+
 
     pub fn read_data(&mut self, packet: USBPacket) -> Option<Vec<u8>> {
         if packet.data_offset.is_none() { return None; }
@@ -445,13 +538,18 @@ impl TotalPhaseReader {
 
     pub fn usb_request_blocks(&mut self) -> Result<Vec<USBRequestBlock>, Box<dyn Error>> {
         let mut results: Vec<USBRequestBlock> = Vec::new();
-        let packets = self.read()?;
-        for result in packets {
+        let packets = self.read_tree(true)?;
+        let root_nodes: Vec<_> = packets
+            .iter()
+            .filter(|node| node.parent().is_none())
+            .collect();
+        for node in root_nodes {
+            let result = node.get();
             let item = match result.operation {
-                OperationType::OutputPacket => {
-                    Some(USBRequestBlock {
-                        direction: USBDirection::DirectionOut,
-                        data: result.data.unwrap(),
+                OperationType::InputTransaction => {
+                    Some(vec![USBRequestBlock {
+                        direction: USBDirection::DirectionIn,
+                        data: result.data.as_ref().unwrap().clone(),
                         speed: result.speed,
                         device_number: result.device_id.unwrap(),
                         endpoint_number: result.endpoint_id.unwrap(),
@@ -461,93 +559,94 @@ impl TotalPhaseReader {
                         index_ns: result.timestamp,
                         duration_ns: result.duration_us.unwrap_or(0),
                         usb_function: total_phase_to_usb_function(result.operation),
-                    })
+                    }])
                 }
-                OperationType::SetupTransaction => {
-                    Some(USBRequestBlock {
+                OperationType::OutputTransaction => {
+                    Some(vec![USBRequestBlock {
                         direction: USBDirection::DirectionOut,
-                        data: result.data.unwrap(),
+                        data: result.data.as_ref().unwrap().clone(),
                         speed: result.speed,
-                        device_number: result.device_id.unwrap_or_default(),
-                        endpoint_number: result.endpoint_id.unwrap_or_default(),
+                        device_number: result.device_id.unwrap(),
+                        endpoint_number: result.endpoint_id.unwrap(),
                         index: result.index as u32,
-                        transfer_type: USBTransferType::Control,
-                        control_stage: Some(USBControlStage::Setup),
+                        transfer_type: USBTransferType::Bulk,
+                        control_stage: None,
                         index_ns: result.timestamp,
                         duration_ns: result.duration_us.unwrap_or(0),
                         usb_function: total_phase_to_usb_function(result.operation),
-                    })
+                    }])
                 }
-                OperationType::InputTransaction => {
-                    if result.level == 0 {
-                        Some(USBRequestBlock {
-                            direction: USBDirection::DirectionIn,
-                            data: result.data.unwrap(),
-                            speed: result.speed,
-                            device_number: result.device_id.unwrap(),
-                            endpoint_number: result.endpoint_id.unwrap(),
-                            index: result.index as u32,
-                            transfer_type: USBTransferType::Bulk,
-                            control_stage: None,
-                            index_ns: result.timestamp,
-                            duration_ns: result.duration_us.unwrap_or(0),
-                            usb_function: total_phase_to_usb_function(result.operation),
-                        })
-                    } else {
-                        Some(USBRequestBlock {
-                            direction: USBDirection::DirectionIn,
-                            data: result.data.unwrap(),
-                            speed: result.speed,
-                            device_number: result.device_id.unwrap(),
-                            endpoint_number: result.endpoint_id.unwrap(),
-                            index: result.index as u32,
-                            transfer_type: USBTransferType::Control,
-                            control_stage: Some(USBControlStage::Data),
-                            index_ns: result.timestamp,
-                            duration_ns: result.duration_us.unwrap_or(0),
-                            usb_function: total_phase_to_usb_function(result.operation),
-                        })
-                    }
-                }
-                OperationType::OutputTransaction => {
-                    if result.level == 0 {
-                        Some(USBRequestBlock {
-                            direction: USBDirection::DirectionOut,
-                            data: result.data.unwrap(),
-                            speed: result.speed,
-                            device_number: result.device_id.unwrap(),
-                            endpoint_number: result.endpoint_id.unwrap(),
-                            index: result.index as u32,
-                            transfer_type: USBTransferType::Bulk,
-                            control_stage: None,
-                            index_ns: result.timestamp,
-                            duration_ns: result.duration_us.unwrap_or(0),
-                            usb_function: total_phase_to_usb_function(result.operation),
-                        })
-                    } else {
-                        Some(USBRequestBlock {
-                            direction: USBDirection::DirectionIn,
-                            data: result.data.unwrap(),
-                            speed: result.speed,
-                            device_number: result.device_id.unwrap(),
-                            endpoint_number: result.endpoint_id.unwrap(),
-                            index: result.index as u32,
-                            transfer_type: USBTransferType::Control,
-                            control_stage: Some(USBControlStage::Complete),
-                            index_ns: result.timestamp,
-                            duration_ns: result.duration_us.unwrap_or(0),
-                            usb_function: total_phase_to_usb_function(result.operation),
-                        })
-                    }
+                OperationType::ControlTransfer |
+                OperationType::GetDeviceDescriptor |
+                OperationType::GetConfigurationDescriptor |
+                OperationType::SetConfiguration |
+                OperationType::GetHubDescriptor |
+                OperationType::GetDeviceQualifierDescriptor |
+                OperationType::GetStringDescriptor => {
+                    Some(compose_control_transfer(&node, &packets))
                 }
                 _ => None
             };
             if item.is_some() {
-                results.push(item.unwrap());
+                results.append(&mut item.unwrap());
             }
         }
         Ok(results)
     }
+}
+
+fn compose_control_transfer(node: &Node<USBPacket>, arena: &Arena<USBPacket>) -> Vec<USBRequestBlock> {
+    let mut results: Vec<USBRequestBlock> = Vec::new();
+    let packet = node.get();
+    let setup = arena.get(node.first_child().unwrap()).unwrap().get();
+
+    let output_children = arena.get_node_id(node).unwrap().children(arena).map(|n| arena.get(n).unwrap().get());
+    let output_data = output_children.filter(|child| child.operation == OperationType::OutputTransaction).collect::<Vec<_>>();
+    let mut data = setup.data.clone().unwrap_or_default();
+    for node in output_data {
+        data.append(&mut node.data.clone().unwrap_or_default());
+    }
+
+    results.push(
+        USBRequestBlock {
+            direction: DirectionOut,
+            speed: packet.speed,
+            device_number: packet.device_id.unwrap(),
+            endpoint_number: packet.endpoint_id.unwrap(),
+            index: packet.index as u32,
+            transfer_type: USBTransferType::Control,
+            control_stage: Some(USBControlStage::Setup),
+            index_ns: setup.timestamp,
+            duration_ns: setup.duration_us.unwrap_or(0),
+            usb_function: total_phase_to_usb_function(setup.operation),
+            data
+        }
+    );
+
+    let input_children = arena.get_node_id(node).unwrap().children(arena).map(|n| arena.get(n).unwrap().get());
+    let input_data = input_children.filter(|child| child.operation == OperationType::InputTransaction).collect::<Vec<_>>();
+    let mut data = Vec::new();
+    let input_packets_length = input_data.len();
+    for node in input_data {
+        data.append(&mut node.data.clone().unwrap_or_default());
+    }
+    if input_packets_length > 0 {
+        results.push(USBRequestBlock {
+            direction: DirectionIn,
+            speed: packet.speed,
+            device_number: packet.device_id.unwrap(),
+            endpoint_number: packet.endpoint_id.unwrap(),
+            index: packet.index as u32,
+            transfer_type: USBTransferType::Control,
+            control_stage: Some(USBControlStage::Data),
+            index_ns: setup.timestamp,
+            duration_ns: setup.duration_us.unwrap_or(0),
+            usb_function: total_phase_to_usb_function(setup.operation),
+            data: data.clone()
+        })
+    }
+
+    results
 }
 
 fn time_from_totalphase_timestamp(ts: &str) -> u64 {
