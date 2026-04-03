@@ -9,25 +9,25 @@ use std::io::{BufWriter, Result};
 use std::mem;
 use std::time::Duration;
 use zerocopy::IntoBytes;
-use zerocopy_derive::{Immutable, IntoBytes};
+use zerocopy_derive::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 pub struct USBPcapWriter {
     writer: PcapNgWriter<BufWriter<File>>,
 }
 
 #[repr(C, packed)]
-#[derive(IntoBytes, Immutable)]
-struct USBPcapPacketHeader {
-    header_length: u16,
-    io_packet_id: u64,
-    usb_status: u32,
-    urb_function: u16,
-    info: u8,
-    bus: u16,
-    device: u16,
-    endpoint: u8,
-    transfer: u8,
-    data_length: u32,
+#[derive(IntoBytes, Immutable, FromBytes, KnownLayout)]
+pub struct USBPcapPacketHeader {
+    pub header_length: u16,
+    pub io_packet_id: u64,
+    pub usb_status: u32,
+    pub urb_function: u16,
+    pub info: u8,
+    pub bus: u16,
+    pub device: u16,
+    pub endpoint: u8,
+    pub transfer: u8,
+    pub data_length: u32,
 }
 
 impl USBPcapWriter {
@@ -48,17 +48,20 @@ impl USBPcapWriter {
     }
 
     pub fn write_urbs(&mut self, urbs: &Vec<USBRequestBlock>) -> Result<()> {
-        let mut control_xfer: Option<u64> = None;
-        let mut control_cat = Vec::<u8>::new();
         for urb in urbs {
-            let size = mem::size_of::<USBPcapPacketHeader>();
-
             let transfer_type = match &urb.transfer_type {
                 USBTransferType::Bulk => 3,
                 USBTransferType::Control => 2,
                 USBTransferType::Interrupt => 1,
                 USBTransferType::Isochronous => 0,
             };
+
+            let size= if urb.transfer_type == USBTransferType::Control {
+                mem::size_of::<USBPcapPacketHeader>() + 1
+            } else {
+                mem::size_of::<USBPcapPacketHeader>()
+            };
+
             let function_id = urb.usb_function.clone() as u16;
 
             let mut endpoint = urb.endpoint_number.clone() as u8;

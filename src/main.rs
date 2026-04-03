@@ -1,13 +1,18 @@
+use std::error::Error;
 use anyhow::Result;
 mod usb_request_block;
 mod total_phase_parser;
 mod pcap_writer;
+mod device;
 
 use crate::pcap_writer::USBPcapWriter;
-use clap::{arg, Command};
+use clap::{arg, ArgMatches, Command};
 use std::fs::File;
 use std::io::BufWriter;
 use indextree::Arena;
+use pcap_file::pcapng::blocks::enhanced_packet::EnhancedPacketBlock;
+use pcap_file::pcapng::PcapNgReader;
+use crate::device::parse_devices;
 
 fn print_tree<T: std::fmt::Debug>(node_id: indextree::NodeId, arena: &Arena<T>, indent: &str) {
     let node = &arena[node_id];
@@ -27,7 +32,7 @@ fn cli() -> Command {
         .arg_required_else_help(true)
         .allow_external_subcommands(true)
         .subcommand(
-            Command::new("info")
+            Command::new("tree")
                 .about("Reads and outputs info about USB stream")
                 .arg(arg!(<FILE_BASE> "The base name of the stream files (.bin and .csv)"))
                 .arg_required_else_help(true),
@@ -39,13 +44,19 @@ fn cli() -> Command {
                 .arg(arg!(<OUTPUT> "The output PCAP file"))
                 .arg_required_else_help(true),
         )
+        .subcommand(
+            Command::new("info")
+            .about("Prints info about the USB stream")
+            .arg(arg!(<PCAP_FILE> "The base name of the stream files (.bin and .csv)"))
+            .arg_required_else_help(true),
+        )
 }
 
 fn main() -> Result<()> {
     let matches = cli().get_matches();
 
     match matches.subcommand() {
-        Some(("info", sub_matches)) => {
+        Some(("tree", sub_matches)) => {
             let mut filebase = sub_matches.get_one::<String>("FILE_BASE").expect("required").to_string();
 
             if filebase.ends_with(".csv") {
@@ -80,9 +91,23 @@ fn main() -> Result<()> {
 
             pcap_writer.write_urbs(&packets.unwrap()).expect("Conversion failed");
         }
+        Some(("info", sub_matches)) => {
+            let filebase = sub_matches.get_one::<String>("PCAP_FILE").expect("required").to_string();
+
+            let mut packets: Vec<EnhancedPacketBlock> = Vec::new();
+
+            let mut reader = PcapNgReader::new(File::open(filebase)?)?;
+            while let Some(block) = reader.next_block() {
+                if let Some(epb) = block?.into_enhanced_packet() {
+                    packets.push( epb.into_owned());
+                }
+            }
+            parse_devices(packets);
+        }
 
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachable!()
     }
 
     Ok(())
 }
+

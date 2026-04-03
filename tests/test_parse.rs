@@ -40,4 +40,34 @@ mod tests {
 
         pcap_writer.write_urbs(&packets.unwrap()).expect("Conversion failed");
     }
+
+    #[test]
+    fn parse_nexus_5_u13_pcap() {
+        let filebase = "ext/testdata/net/nexus_5_ubuntu13_media_then_tether";
+        let output_path = "ext/testdata/net/nexus_5_ubuntu13_media_then_tether.pcap";
+
+        let mut reader = total_phase_parser::totalphase_reader(filebase).unwrap();
+        let packets = reader.usb_request_blocks();
+
+        let file = File::create(output_path).unwrap();
+        let writer = BufWriter::new(file);
+        let mut pcap_writer = USBPcapWriter::new(writer).unwrap();
+
+        pcap_writer.write_urbs(&packets.unwrap()).expect("Conversion failed");
+    }
+
+    #[test]
+    fn parse_ft230x_basic_uart_w7() {
+        let filebase = "ext/testdata/serial/ftdi/FT230X_Basic_UART_w7_init";
+        let output_path = "ext/testdata/serial/ftdi/FT230X_Basic_UART_w7_init.pcap";
+
+        let mut reader = total_phase_parser::totalphase_reader(filebase).unwrap();
+        let packets = reader.usb_request_blocks();
+
+        let file = File::create(output_path).unwrap();
+        let writer = BufWriter::new(file);
+        let mut pcap_writer = USBPcapWriter::new(writer).unwrap();
+
+        pcap_writer.write_urbs(&packets.unwrap()).expect("Conversion failed");
+    }
 }

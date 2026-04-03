@@ -59,7 +59,17 @@ pub enum USB3Signal {
 
 #[derive(Debug, PartialEq, Eq, Display, Clone, Copy)]
 pub enum OperationType {
+    ClearEndpointFeature,
     GetStringDescriptor,
+    GetStorageInfo,
+    GetDevicePropValue,
+    GetObjectPropDesc,
+    GetStorageIDs,
+    GetDeviceInfo,
+    CommandBlock,
+    DataBlock,
+    GetBOSDescriptor,
+    ResponseBlock,
     NotYetPacket,
     InPacket,
     CorruptedPacket,
@@ -95,7 +105,7 @@ pub enum OperationType {
     OutputPacket,
     GetConfigurationDescriptor,
     SetupPacket,
-
+    OpenSession,
     StartOfFramePacket,
     Comment,
     TargetState(ConnectionState),
@@ -345,10 +355,16 @@ impl<'a> USBPacket<'a> {
 fn operation_to_operation_type(operation: String) -> OperationType {
     match operation.as_str() {
         "Set Address" => OperationType::SetAddress,
+        "OpenSession" => OperationType::OpenSession,
+        "Command Block" => OperationType::CommandBlock,
+        "GetDeviceInfo" => OperationType::GetDeviceInfo,
+        "Get BOS Descriptor" => OperationType::GetBOSDescriptor,
+        "Response Block" => OperationType::ResponseBlock,
         "LTSSM Transition" => OperationType::LinkTrainingStatusStateMachine,
         "Get Device Descriptor" => OperationType::GetDeviceDescriptor,
         "SETUP txn" => OperationType::SetupTransaction,
         "OUT tx" => OperationType::OutputTransaction,
+        "Data Block" => OperationType::DataBlock,
         "OUT txn" => OperationType::OutputTransaction,
         "Get Hub Descriptor" => OperationType::GetHubDescriptor,
         "Set Port Feature" => OperationType::SetPortFeature,
@@ -368,6 +384,8 @@ fn operation_to_operation_type(operation: String) -> OperationType {
         "DATA1 packet" => OperationType::Data1Packet,
         "OUT packet" => OperationType::OutputPacket,
         "IN packet" => OperationType::InputPacket,
+        "GetStorageIDs" => OperationType::GetStorageIDs,
+        "GetStorageInfo" => OperationType::GetStorageInfo,
         "Set Idle" => OperationType::SetIdle,
         "Hub Status" => OperationType::HubStatus,
         "Get Port Status" => OperationType::GetPortStatus,
@@ -375,6 +393,7 @@ fn operation_to_operation_type(operation: String) -> OperationType {
         "Clear Port Feature" => OperationType::ClearPortFeature,
         "SETUP packet" => OperationType::SetupPacket,
         "Comment" => OperationType::Comment,
+        "GetObjectPropDesc" => OperationType::GetObjectPropDesc,
         "<HNP> / <Full-speed>" => OperationType::SpeedTransition(USBSpeed::SpeedFull),
         "<LFPS Polling/U1 Exit>" => OperationType::LFPSPolling,
         "<SuperSpeed Host Connected>" => OperationType::HostState(ConnectionState::Connected),
@@ -395,8 +414,12 @@ fn operation_to_operation_type(operation: String) -> OperationType {
         "<VBus Present>" => OperationType::VBus(VBusState::Present),
         "NAK packet" => OperationType::NegativeAcknowledge,
         "<Chirp J>" => OperationType::USB3Signal(USB3Signal::ChirpJ),
+        "CDC IN Data" => OperationType::InputTransaction,
+        "CDC OUT Data" => OperationType::OutputTransaction,
+        "Clear Endpoint Feature" => OperationType::ClearEndpointFeature,
         "<SuperSpeed Host Disconnected>" => OperationType::HostState(ConnectionState::Disconnected),
         "IN-NAK" => OperationType::InputNegativeAcknowledge,
+        "GetDevicePropValue" => OperationType::GetDevicePropValue,
         "Get Report Descriptor" => OperationType::GetReportDescriptor,
         "<Host connected>" => OperationType::HostState(ConnectionState::Connected),
         "<Full-speed>" => OperationType::SpeedTransition(USBSpeed::SpeedFull),
@@ -434,6 +457,9 @@ pub fn total_phase_to_usb_function(op: OperationType) -> USBFunction {
         OperationType::OutputPacket => {
             USBFunction::BulkOrInterruptTransfer
         }
+        OperationType::GetStringDescriptor => {
+            USBFunction::GetDescriptorFromDevice
+        }
         OperationType::ControlTransfer => {
             USBFunction::ControlTransferEx
         }
@@ -446,13 +472,10 @@ pub fn total_phase_to_usb_function(op: OperationType) -> USBFunction {
         OperationType::Data1Packet => {
             USBFunction::ControlTransfer
         }
-        OperationType::OutputTransaction => {
-            USBFunction::BulkOrInterruptTransfer
-        }
-        OperationType::InPacket => {
-            USBFunction::BulkOrInterruptTransfer
-        }
-        OperationType::InputPacket => {
+        OperationType::OutputTransaction |
+        OperationType::InputPacket |
+        OperationType::InPacket |
+        OperationType::InputTransaction => {
             USBFunction::BulkOrInterruptTransfer
         }
         OperationType::InputReport => {
@@ -476,7 +499,8 @@ impl TotalPhaseReader {
             csv_file.read_line(&mut line)?; // Read and discard a line
         }
 
-        let csv_reader = csv::Reader::from_reader(csv_file);
+        let mut csv_builder = csv::ReaderBuilder::new();
+        let csv_reader = csv_builder.flexible(true).from_reader(csv_file);
         Ok(Self {
             bin_path,
             csv_reader,
@@ -580,6 +604,7 @@ impl TotalPhaseReader {
                 OperationType::GetDeviceDescriptor |
                 OperationType::GetConfigurationDescriptor |
                 OperationType::SetConfiguration |
+                OperationType::SetAddress |
                 OperationType::GetHubDescriptor |
                 OperationType::GetDeviceQualifierDescriptor |
                 OperationType::GetStringDescriptor => {
@@ -618,7 +643,7 @@ fn compose_control_transfer(node: &Node<USBPacket>, arena: &Arena<USBPacket>) ->
             control_stage: Some(USBControlStage::Setup),
             index_ns: setup.timestamp,
             duration_ns: setup.duration_us.unwrap_or(0),
-            usb_function: total_phase_to_usb_function(setup.operation),
+            usb_function: total_phase_to_usb_function(packet.operation),
             data
         }
     );
@@ -641,7 +666,7 @@ fn compose_control_transfer(node: &Node<USBPacket>, arena: &Arena<USBPacket>) ->
             control_stage: Some(USBControlStage::Data),
             index_ns: setup.timestamp,
             duration_ns: setup.duration_us.unwrap_or(0),
-            usb_function: total_phase_to_usb_function(setup.operation),
+            usb_function: total_phase_to_usb_function(packet.operation),
             data: data.clone()
         })
     }

@@ -1,6 +1,7 @@
 use bitflags::bitflags;
 use std::iter::Map;
 use uuid::Uuid;
+use zerocopy_derive::{ Immutable, KnownLayout, TryFromBytes};
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum USBDirection {
@@ -9,7 +10,7 @@ pub enum USBDirection {
     DirectionOut,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum USBTransferType {
     Control,
     Bulk,
@@ -248,6 +249,10 @@ impl USBRequestBlock {
     }
 
     pub fn is_control(&self) -> bool {
+        self.transfer_type == USBTransferType::Control
+    }
+
+    pub fn is_default(&self) -> bool {
         self.endpoint_number == 0
     }
 }
@@ -274,6 +279,44 @@ pub struct USBEndpoint {
     endpoint_id: u8,
     direction: USBDirection,
     urbs: Vec<USBRequestBlock>,
+}
+
+#[repr(u8)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Immutable, TryFromBytes)]
+pub enum USBControlRequestType {
+UsbReqGetStatus =   0x00,
+UsbReqClearFeature =      0x01,
+UsbReqSetFeature =    0x03,
+UsbReqSetAddress =   0x05,
+UsbReqGetDescriptor =     0x06,
+UsbReqSetDescriptor =    0x07,
+ UsbReqGetConfiguration =   0x08,
+UsbReqSetConfiguration =  0x09,
+ UsbReqGetInterface =  0x0A,
+UsbReqSetInterface =      0x0B,
+ UsbReqSynchFrame =   0x0C,
+UsbReqSetSel =  0x30,
+UsbReqSetEncryption =     0x0D,
+UsbReqGetEncryption =    0x0E,
+ UsbReqSetHandshake =   0x0F,
+UsbReqGetHandshake =   0x10,
+UsbReqSetConnection =     0x11,
+ UsbReqSetSecurityData =  0x12,
+UsbReqGetSecurityData = 0x13,
+UsbReqSetWusbData =  0x14,
+ UsbReqLoopbackDataWrite =  0x15,
+UsbReqLoopbackDataRead =  0x16,
+ UsbReqSetInterfaceDs =  0x17,
+}
+
+#[repr(packed)]
+#[derive(TryFromBytes, Debug, PartialEq, Eq, Clone, Copy, Hash, KnownLayout, Immutable)]
+pub struct USBControlRequest {
+     pub request_type: USBControlRequestType,
+     request: u8,
+     pub value: u16,
+     index: u16,
+     length: u16,
 }
 
 #[derive(Debug)]
