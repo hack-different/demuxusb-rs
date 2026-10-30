@@ -215,11 +215,14 @@ fn read_status_bits_match_packet_bytes() {
                 if !pid_ok {
                     bad_pid += 1;
                 }
-                // beagle.so checks a SOF longer than its three bytes against CRC16, which fails;
-                // shorter packets are not CRC-checked at all.
-                if pid == 0xa5 && data.unwrap().len() > 3 {
-                    assert!(status.contains(ReadStatus::USB_ERR_BAD_CRC), "{}: SOF {:02x?} status {status}", path.display(), data.unwrap());
-                }
+                // The CRC check transcribed from beagle.so must agree with the analyzer's verdict.
+                assert_eq!(
+                    demuxusb_rs::beagle::stream::crc_is_bad(data.unwrap()),
+                    status.contains(ReadStatus::USB_ERR_BAD_CRC),
+                    "{}: {:02x?} status {status}",
+                    path.display(),
+                    data.unwrap()
+                );
             }
         }
     }
