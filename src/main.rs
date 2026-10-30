@@ -13,7 +13,7 @@ use indextree::Arena;
 use pcap_file::pcapng::blocks::enhanced_packet::EnhancedPacketBlock;
 use pcap_file::pcapng::PcapNgReader;
 use crate::device::parse_devices;
-use demuxusb_rs::tdc::{self, Element, TdcFile};
+use demuxusb_rs::tdc::{self, bus_event_name, Element, TdcFile};
 use std::collections::BTreeMap;
 
 fn print_tree<T: std::fmt::Debug>(node_id: indextree::NodeId, arena: &Arena<T>, indent: &str) {
@@ -227,13 +227,16 @@ fn describe_record(file: &TdcFile, record: &tdc::Record) -> String {
                 if info.direction_in { "in" } else { "" },
                 info.pid
             )),
-            Element::Packet { data, .. } => description.push(format!("packet {}", hex::encode(data))),
+            Element::Packet { data, status } => description.push(format!("packet {} status={status}", hex::encode(data))),
             Element::Transaction { kind, children } => description.push(format!("transaction kind={kind:#x} children={children:?}")),
             Element::SofGroup { count, first_frame, last_frame, .. } => {
                 description.push(format!("[{count} SOF] frames {first_frame}-{last_frame}"))
             }
             Element::GroupCount { count, .. } => description.push(format!("[{count} collapsed]")),
-            Element::BusEvent { code, flags, .. } => description.push(format!("bus event {code:#x} flags={flags:#x}")),
+            Element::BusEvent { code, status } => description.push(format!(
+                "bus event {code:#x} ({}) status={status}",
+                bus_event_name(*code).unwrap_or("unknown")
+            )),
             Element::Comment(text) => description.push(format!("comment {text:?}")),
             other => description.push(format!("{other:?}")),
         }

@@ -18,7 +18,8 @@ pub enum Speed {
     Unknown,
     Low,
     Full,
-    /// Inferred from the bit layout; none of the reference captures with a CSV export are high-speed.
+    /// The Beagle API uses the same codes internally (1 low, 3 full, 4 high), see
+    /// `docs/tdc-format.md`. None of the reference captures with a CSV export are high-speed.
     High,
     Other(u8),
 }
@@ -73,6 +74,88 @@ pub struct PacketInfo {
     pub direction_in: bool,
 }
 
+/// The Beagle API's per-read status word (`BG_READ_*` / `BG_READ_USB_*` in `beagle.h`), which
+/// Data Center stores unchanged on packets (element 0x0B) and bus events (element 0x0F).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ReadStatus(pub u32);
+
+impl ReadStatus {
+    pub const TIMEOUT: u32 = 0x0000_0100;
+    pub const ERR_MIDDLE_OF_PACKET: u32 = 0x0000_0200;
+    pub const ERR_SHORT_BUFFER: u32 = 0x0000_0400;
+    pub const ERR_PARTIAL_LAST_BYTE: u32 = 0x0000_0800;
+    pub const ERR_UNEXPECTED: u32 = 0x0000_1000;
+    pub const USB_ERR_BAD_SIGNALS: u32 = 0x0001_0000;
+    pub const USB_ERR_BAD_SYNC: u32 = 0x0002_0000;
+    pub const USB_ERR_BIT_STUFF: u32 = 0x0004_0000;
+    pub const USB_ERR_FALSE_EOP: u32 = 0x0008_0000;
+    pub const USB_ERR_LONG_EOP: u32 = 0x0010_0000;
+    pub const USB_ERR_BAD_PID: u32 = 0x0020_0000;
+    pub const USB_ERR_BAD_CRC: u32 = 0x0040_0000;
+    pub const USB_TRUNCATION_MODE: u32 = 0x2000_0000;
+    pub const USB_END_OF_CAPTURE: u32 = 0x4000_0000;
+
+    /// Names of the USB 1.x/2.0 bits, in bit order. Data Center's CSV `Err` column shows
+    /// `TIMEOUT` as "T" and `ERR_UNEXPECTED` as "U".
+    pub const NAMES: [(u32, &'static str); 14] = [
+        (Self::TIMEOUT, "TIMEOUT"),
+        (Self::ERR_MIDDLE_OF_PACKET, "MIDDLE_OF_PACKET"),
+        (Self::ERR_SHORT_BUFFER, "SHORT_BUFFER"),
+        (Self::ERR_PARTIAL_LAST_BYTE, "PARTIAL_LAST_BYTE"),
+        (Self::ERR_UNEXPECTED, "UNEXPECTED"),
+        (Self::USB_ERR_BAD_SIGNALS, "BAD_SIGNALS"),
+        (Self::USB_ERR_BAD_SYNC, "BAD_SYNC"),
+        (Self::USB_ERR_BIT_STUFF, "BIT_STUFF"),
+        (Self::USB_ERR_FALSE_EOP, "FALSE_EOP"),
+        (Self::USB_ERR_LONG_EOP, "LONG_EOP"),
+        (Self::USB_ERR_BAD_PID, "BAD_PID"),
+        (Self::USB_ERR_BAD_CRC, "BAD_CRC"),
+        (Self::USB_TRUNCATION_MODE, "TRUNCATION_MODE"),
+        (Self::USB_END_OF_CAPTURE, "END_OF_CAPTURE"),
+    ];
+
+    pub fn contains(self, bits: u32) -> bool {
+        self.0 & bits == bits
+    }
+
+    /// Bits not covered by [`ReadStatus::NAMES`], ignoring the truncation length in bits 0-7.
+    pub fn unknown_bits(self) -> u32 {
+        let known = Self::NAMES.iter().fold(0xff, |acc, (bit, _)| acc | bit);
+        self.0 & !known
+    }
+}
+
+impl fmt::Display for ReadStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let names: Vec<&str> = Self::NAMES
+            .iter()
+            .filter(|(bit, _)| self.0 & bit != 0)
+            .map(|(_, name)| *name)
+            .collect();
+        match (names.is_empty(), self.unknown_bits()) {
+            (true, 0) => write!(f, "OK"),
+            (_, 0) => write!(f, "{}", names.join("|")),
+            (_, rest) => write!(f, "{}{}{rest:#x}", names.join("|"), if names.is_empty() { "" } else { "|" }),
+        }
+    }
+}
+
+/// Bus event codes (element 0x0F) checked against Data Center's CSV exports. Each code is one
+/// CSV row; some rows list several line states.
+pub fn bus_event_name(code: u8) -> Option<&'static str> {
+    Some(match code {
+        0x00 => "Reset / Keep-alive / Target disconnected",
+        0x01 => "Reset / Target disconnected",
+        0x04 => "Reset / Chirp J / Tiny J",
+        0x07 => "Host disconnected",
+        0x08 => "Host connected",
+        0x0a => "Low-speed",
+        0x0b => "Full-speed",
+        0x0e => "Suspend",
+        _ => return None,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Element {
     /// 0x00
@@ -92,7 +175,8 @@ pub enum Element {
     },
     /// 0x05, the number of packets a group collapses.
     GroupCount { count: u32, reserved: u16 },
-    /// 0x06, a run of start-of-frame packets.
+    /// 0x06, a run of start-of-frame packets. `flags` is 0x10 on SOF runs and 0x11 on low-speed
+    /// keep-alive runs (whose frame numbers do not span `count`).
     SofGroup {
         count: u32,
         reserved: u8,
@@ -100,14 +184,14 @@ pub enum Element {
         first_frame: u16,
         last_frame: u16,
     },
-    /// 0x0B, the raw bytes of one USB packet: PID, payload and CRC, without SYNC or EOP.
-    Packet { status: u32, data: Vec<u8> },
+    /// 0x0B, the raw bytes of one USB packet: PID, payload and CRC, without SYNC or EOP, and the
+    /// Beagle API read status for it.
+    Packet { status: ReadStatus, data: Vec<u8> },
     /// 0x0C, a transaction made of child records (listed newest first).
     Transaction { kind: u8, children: Vec<u32> },
-    /// 0x0F, a bus state change. Codes confirmed against CSV exports: 1 target disconnected,
-    /// 4 reset, 7 host disconnected, 8 host connected, 0x0B speed detected, 0x0E suspend.
-    /// The flag bits (0x01, 0x10 seen) are not understood.
-    BusEvent { code: u16, flags: u8, reserved: u16 },
+    /// 0x0F, a bus state change: a Data Center event code (see [`bus_event_name`]; these are not
+    /// the API's `BG_EVENT_USB_*` bits) and the Beagle API read status for it.
+    BusEvent { code: u8, status: ReadStatus },
     /// 0x14 and 0x16: a count followed by child record numbers.
     ChildList {
         tag: u8,
@@ -191,7 +275,7 @@ impl Element {
                 last_frame: u16_at(8),
             },
             (0x0b, len) if len >= 8 && 8 + u32_at(4) as usize == len => Element::Packet {
-                status: u32_at(0),
+                status: ReadStatus(u32_at(0)),
                 data: data[8..].to_vec(),
             },
             (0x0c, len) if len >= 2 && len == 2 + 4 * data[1] as usize => Element::Transaction {
@@ -199,9 +283,8 @@ impl Element {
                 children: u32_list(2),
             },
             (0x0f, 5) => Element::BusEvent {
-                code: u16_at(0),
-                flags: data[2],
-                reserved: u16_at(3),
+                code: data[0],
+                status: ReadStatus(u32_at(1)),
             },
             (0x14 | 0x16, len) if len >= 4 && len % 4 == 0 => Element::ChildList {
                 tag,
