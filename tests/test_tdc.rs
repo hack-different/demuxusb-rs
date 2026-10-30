@@ -176,3 +176,52 @@ fn exports_pcapng() {
     assert_eq!(written, 1887);
     assert!(out.len() > written * 32);
 }
+
+/// Packet and bus-event status words are the Beagle API's `BG_READ_*` bits. Check that every
+/// sample only uses documented bits, and that the PID and CRC error bits agree with the bytes.
+#[test]
+fn read_status_bits_match_packet_bytes() {
+    use demuxusb_rs::tdc::{Element, ReadStatus};
+
+    if !testdata_present() {
+        return;
+    }
+    let mut files = Vec::new();
+    tdc_files(Path::new(TESTDATA), &mut files);
+
+    let mut bad_pid = 0;
+    let mut flagged = 0;
+    for path in files {
+        let file = TdcFile::open(&path).unwrap();
+        for record in file.records() {
+            for element in &record.unwrap().elements {
+                let (status, data) = match element {
+                    Element::Packet { status, data } => (*status, Some(data)),
+                    Element::BusEvent { status, .. } => (*status, None),
+                    _ => continue,
+                };
+                assert_eq!(status.unknown_bits(), 0, "{}: status {:#x}", path.display(), status.0);
+                if status.0 != 0 {
+                    flagged += 1;
+                }
+                let Some(&pid) = data.and_then(|d| d.first()) else { continue };
+                let pid_ok = pid >> 4 == !pid & 0x0f;
+                assert_eq!(
+                    status.contains(ReadStatus::USB_ERR_BAD_PID),
+                    !pid_ok,
+                    "{}: PID {pid:#04x} with status {status}",
+                    path.display()
+                );
+                if !pid_ok {
+                    bad_pid += 1;
+                }
+                // beagle.so checks a SOF longer than its three bytes against CRC16, which fails;
+                // shorter packets are not CRC-checked at all.
+                if pid == 0xa5 && data.unwrap().len() > 3 {
+                    assert!(status.contains(ReadStatus::USB_ERR_BAD_CRC), "{}: SOF {:02x?} status {status}", path.display(), data.unwrap());
+                }
+            }
+        }
+    }
+    assert!(bad_pid >= 3 && flagged > bad_pid, "expected some error packets in the samples");
+}
