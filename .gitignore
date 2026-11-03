@@ -1,1 +1,13 @@
 /target
+
+# Language bindings
+/bindings/ruby/lib/demuxusb/*.so
+/bindings/ruby/lib/demuxusb/*.bundle
+/bindings/ruby/lib/demuxusb/*/
+/bindings/ruby/tmp/
+/bindings/ruby/pkg/
+/bindings/ruby/Gemfile.lock
+/bindings/python/*.so
+__pycache__/
+*.egg-info/
+.venv/

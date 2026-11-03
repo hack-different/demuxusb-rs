@@ -1,0 +1,13 @@
+[package]
+name = "demuxusb"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "demuxusb"
+crate-type = ["cdylib"]
+
+[dependencies]
+demuxusb-rs = { path = "../../../.." }
+magnus = "0.9"
