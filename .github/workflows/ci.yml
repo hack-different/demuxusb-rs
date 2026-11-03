@@ -1,0 +1,30 @@
+# Builds the crate and runs the tests that don't need captures.
+#
+# tests/test_parse.rs reads real captures from ext/testdata (the USBTraces submodule). The submodule
+# pins a commit that isn't on rickmark/USBTraces yet, so CI doesn't check it out and skips that
+# binary; tests/test_tdc.rs skips its capture checks when the data is absent. Once the submodule
+# commit is pushed, set `submodules: true` below and drop the explicit test list.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: cargo build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --all-targets --locked
+      - run: cargo test --locked --lib --bins --test test_tdc --test test_recovery_file
+      - run: cargo test --locked --doc
