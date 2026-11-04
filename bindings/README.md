@@ -61,8 +61,20 @@ Packet bytes are binary (`ASCII-8BIT`) Strings. Malformed files raise `Demuxusb:
 Both test suites build synthetic files and also check a real capture from the USBTraces
 collection when it is present at `ext/testdata` (or wherever `DEMUXUSB_TESTDATA` points).
 
+## Publishing
+
+Order matters, because the gem's extension depends on the published crate:
+
+1. `cargo publish` at the repository root (crate `demuxusb-rs`). Run `cargo publish --dry-run` first.
+2. `cd bindings/ruby && gem build demuxusb.gemspec && gem push demuxusb-0.1.0.gem`. This is a
+   source gem, so installing it compiles the extension and needs a Rust toolchain.
+3. Optional, PyPI: `cd bindings/python && maturin publish`. CI-built wheels for each platform
+   are better long term.
+
+Inside this repository the root `Cargo.toml` patches `demuxusb-rs` to the local copy, so the
+bindings always build against the code next to them.
+
 ## Not covered yet
 
 The older CSV + `.bin` reader (`total_phase_parser`) is not bound: it borrows across packets
-and is being superseded by the `.tdc` reader. The Ruby gem builds from this repository only;
-publishing it would need the core crate vendored or published to crates.io.
+and is being superseded by the `.tdc` reader.
