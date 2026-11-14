@@ -135,7 +135,7 @@ fn element_to_hash(ruby: &Ruby, element: &Element) -> Result<RHash, Error> {
             "sof_group"
         }
         Element::Packet { status, data } => {
-            set("status", status.into_value_with(ruby))?;
+            set("status", status.0.into_value_with(ruby))?;
             set("data", bytes(ruby, data).as_value())?;
             "packet"
         }
@@ -144,14 +144,9 @@ fn element_to_hash(ruby: &Ruby, element: &Element) -> Result<RHash, Error> {
             set("children", ruby.ary_from_vec(children.clone()).as_value())?;
             "transaction"
         }
-        Element::BusEvent {
-            code,
-            flags,
-            reserved,
-        } => {
+        Element::BusEvent { code, status } => {
             set("code", code.into_value_with(ruby))?;
-            set("flags", flags.into_value_with(ruby))?;
-            set("reserved", reserved.into_value_with(ruby))?;
+            set("status", status.0.into_value_with(ruby))?;
             "bus_event"
         }
         Element::ChildList {
@@ -266,7 +261,7 @@ impl RbRecord {
             _ => None,
         })
     }
-    fn bus_event(&self) -> Option<u16> {
+    fn bus_event(&self) -> Option<u8> {
         self.record.elements.iter().find_map(|e| match e {
             Element::BusEvent { code, .. } => Some(*code),
             _ => None,

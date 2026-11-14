@@ -203,7 +203,7 @@ fn element_to_dict<'py>(py: Python<'py>, element: &Element) -> PyResult<Bound<'p
             "sof_group"
         }
         Element::Packet { status, data } => {
-            d.set_item("status", status)?;
+            d.set_item("status", status.0)?;
             d.set_item("data", PyBytes::new(py, data))?;
             "packet"
         }
@@ -212,14 +212,9 @@ fn element_to_dict<'py>(py: Python<'py>, element: &Element) -> PyResult<Bound<'p
             d.set_item("children", children)?;
             "transaction"
         }
-        Element::BusEvent {
-            code,
-            flags,
-            reserved,
-        } => {
+        Element::BusEvent { code, status } => {
             d.set_item("code", code)?;
-            d.set_item("flags", flags)?;
-            d.set_item("reserved", reserved)?;
+            d.set_item("status", status.0)?;
             "bus_event"
         }
         Element::ChildList {
@@ -359,10 +354,10 @@ impl PyRecord {
             _ => None,
         })
     }
-    /// Code of the bus event (1 target disconnected, 4 reset, 7 host disconnected, 8 host
-    /// connected, 0x0B speed detected, 0x0E suspend), if this record is one.
+    /// Data Center code of the bus event (see `demuxusb_rs::tdc::bus_event_name`), if this
+    /// record is one.
     #[getter]
-    fn bus_event(&self) -> Option<u16> {
+    fn bus_event(&self) -> Option<u8> {
         self.record.elements.iter().find_map(|e| match e {
             Element::BusEvent { code, .. } => Some(*code),
             _ => None,
