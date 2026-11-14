@@ -233,6 +233,16 @@ impl TdcFile {
         }
     }
 
+    /// Resumes record iteration at a stream offset previously returned by [`Records::offset`].
+    /// Offsets outside the record section are clamped to it. This lets callers that cannot hold
+    /// a borrow of the file (such as the Python and Ruby bindings) iterate lazily.
+    pub fn records_at(&self, offset: usize) -> Records<'_> {
+        Records {
+            stream: &self.stream[..self.records_end],
+            offset: offset.clamp(self.records_start, self.records_end),
+        }
+    }
+
     pub fn capture(&self, id: u8) -> Option<&Capture> {
         self.captures.iter().find(|c| c.id == id as u32)
     }
@@ -246,6 +256,13 @@ impl TdcFile {
 pub struct Records<'a> {
     stream: &'a [u8],
     offset: usize,
+}
+
+impl Records<'_> {
+    /// Stream offset of the next record this iterator will return.
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
 }
 
 impl Iterator for Records<'_> {
@@ -554,6 +571,25 @@ pub(crate) mod tests {
         let file = TdcFile::parse(&bytes).unwrap();
         assert_eq!(file.captures.len(), 2);
         assert_eq!(file.records().count(), 1);
+    }
+
+    #[test]
+    fn resumes_records_at_offset() {
+        let mut stream = capture_entry(1);
+        for i in 0..5u32 {
+            stream.extend(packet_record(i, i as u64, &[0xd2]));
+        }
+        let file = TdcFile::parse(&build_file(&stream)).unwrap();
+
+        let mut records = file.records_at(0);
+        records.next().unwrap().unwrap();
+        records.next().unwrap().unwrap();
+        let resumed: Vec<u32> = file
+            .records_at(records.offset())
+            .map(|r| r.unwrap().sequence)
+            .collect();
+        assert_eq!(resumed, vec![2, 3, 4]);
+        assert_eq!(file.records_at(usize::MAX).count(), 0);
     }
 
     #[test]
