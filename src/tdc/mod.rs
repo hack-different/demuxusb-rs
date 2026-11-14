@@ -20,7 +20,7 @@ pub mod fastlz;
 pub mod pcap;
 pub mod record;
 
-pub use record::{Element, PacketInfo, Record, Speed, Status};
+pub use record::{bus_event_name, Element, PacketInfo, ReadStatus, Record, Speed, Status};
 
 use std::fmt;
 use std::path::Path;
