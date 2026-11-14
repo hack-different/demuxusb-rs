@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "binaryninja": {
+      "type": "http",
+      "url": "http://localhost:24642/mcp"
+    }
+  }
+}
